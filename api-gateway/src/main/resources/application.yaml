@@ -1,0 +1,63 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+
+  cloud:
+    gateway:
+      discovery:
+        locator:
+          enabled: true
+          lower-case-service-id: true  # tên service viết thường
+
+      routes:
+        # PRODUCT SERVICE
+        - id: product-service
+          uri: lb://product-service
+          predicates:
+            - Path=/api/products,/api/products/**,
+                  /api/categories,/api/categories/**,
+                  /api/suppliers,/api/suppliers/**
+
+
+        # INVENTORY SERVICE (store + import)
+        - id: inventory-service
+          uri: lb://inventory-service
+          predicates:
+            - Path=/api/stores,/api/stores/**,
+                   /api/imports,/api/imports/**,
+                   /api/exports,/api/exports/**,
+                   /api/stocks,/api/stocks/**
+
+        # ORDER SERVICE (customer + order)
+        - id: order-service
+          uri: lb://order-service
+          predicates:
+            - Path=/api/customers,/api/customers/**,/api/orders,/api/orders/**
+
+        # PROMOTION SERVICE
+        - id: promotion-service
+          uri: lb://promotion-service
+          predicates:
+            - Path=/api/vouchers,/api/vouchers/**
+
+        # #SETTING SERVICE
+        #  - id: settings-cms-service
+        #   uri: lb://setting-cms-service
+        #   predicates:
+        #     - Path=/api/settings/**, /api/post-categories/**, /api/posts/**
+
+        # AUTH SERVICE
+        - id: auth-service
+          uri: lb://auth-service
+          predicates:
+            - Path=/api/auth/**
+
+        
+              
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka

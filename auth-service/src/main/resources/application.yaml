@@ -1,0 +1,22 @@
+server:
+  port: 8087
+
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/qlkh?createDatabaseIfNotExist=true
+    username: root
+    password: Viethien1@
+  jpa:
+    hibernate:
+      ddl-auto: none
+    show-sql: true
+
+jwt:
+  secret: "this-is-my-ultra-long-jwt-secret-key-1234567890"
+  expiration-ms: 86400000
+
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka
