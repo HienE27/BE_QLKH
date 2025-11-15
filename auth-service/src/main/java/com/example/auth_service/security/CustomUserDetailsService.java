@@ -1,5 +1,6 @@
 package com.example.auth_service.security;
 
+import com.example.auth_service.entity.AdRole;
 import com.example.auth_service.entity.AdUser;
 import com.example.auth_service.repository.AdUserRepository;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -11,28 +12,35 @@ import java.util.List;
 @Service
 public class CustomUserDetailsService implements UserDetailsService {
 
-    private final AdUserRepository userRepo;
+    private final AdUserRepository userRepository;
 
-    public CustomUserDetailsService(AdUserRepository userRepo) {
-        this.userRepo = userRepo;
+    public CustomUserDetailsService(AdUserRepository userRepository) {
+        this.userRepository = userRepository;
     }
 
     @Override
     public UserDetails loadUserByUsername(String username)
             throws UsernameNotFoundException {
 
-        AdUser user = userRepo.findByUsername(username)
-                .orElseThrow(() -> new UsernameNotFoundException("User not found"));
+        AdUser user = userRepository.findByUsername(username)
+                .orElseThrow(() ->
+                        new UsernameNotFoundException("User not found: " + username));
 
         boolean enabled = user.getActive() == null || Boolean.TRUE.equals(user.getActive());
 
-        List<SimpleGrantedAuthority> authorities =
-                user.getRoles() == null ? List.of() :
-                        user.getRoles().stream()
-                                .map(r -> new SimpleGrantedAuthority("ROLE_" + r.getCode()))
-                                .toList();
+        List<SimpleGrantedAuthority> authorities = user.getRoles().stream()
+                .map(AdRole::getRoleCode)
+                .map(code -> new SimpleGrantedAuthority("ROLE_" + code))
+                .toList();
 
-        return new User(user.getUsername(), user.getPassword(), enabled,
-                true, true, true, authorities);
+        return new org.springframework.security.core.userdetails.User(
+                user.getUsername(),
+                user.getPassword(),
+                enabled,
+                true,
+                true,
+                true,
+                authorities
+        );
     }
 }

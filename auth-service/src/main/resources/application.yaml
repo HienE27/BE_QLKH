@@ -2,17 +2,24 @@ server:
   port: 8087
 
 spring:
+  application:
+    name: auth-service
+
   datasource:
-    url: jdbc:mysql://localhost:3306/qlkh?createDatabaseIfNotExist=true
+    url: jdbc:mysql://localhost:3306/qlkh?allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=UTC
     username: root
     password: Viethien1@
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
   jpa:
     hibernate:
-      ddl-auto: none
+      ddl-auto: none  
     show-sql: true
-
+    properties:
+      hibernate.format_sql: true
+      
 jwt:
-  secret: "this-is-my-ultra-long-jwt-secret-key-1234567890"
+  secret: 'this-is-my-ultra-long-jwt-secret-key-1234567890'
   expiration-ms: 86400000
 
 

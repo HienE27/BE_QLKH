@@ -3,7 +3,7 @@ package com.example.auth_service.entity;
 import jakarta.persistence.*;
 import lombok.Data;
 
-import java.util.Set;
+import java.util.Date;
 
 @Entity
 @Table(name = "ad_roles")
@@ -12,15 +12,18 @@ public class AdRole {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "role_id")
-    private Long id;
+    @Column(name = "roles_id")   
+    private Long id;             
 
     @Column(name = "role_code")
-    private String code;
+    private String roleCode;
 
-    @Column(name = "role_name")
-    private String name;
+    @Column(name = "display_name")
+    private String displayName;
 
-    @ManyToMany(mappedBy = "roles")
-    private Set<AdUser> users;
+    @Column(name = "created_at")
+    private Date createdAt;
+
+    @Column(name = "updated_at")
+    private Date updatedAt;
 }

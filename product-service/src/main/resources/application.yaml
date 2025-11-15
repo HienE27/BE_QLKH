@@ -13,7 +13,7 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: none   # vì anh đã có sẵn DB, không cho nó tự tạo
+      ddl-auto: none  
     show-sql: true
     properties:
       hibernate.format_sql: true

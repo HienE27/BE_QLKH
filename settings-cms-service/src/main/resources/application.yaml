@@ -1,15 +1,14 @@
 server:
-  port: 8085
+  port: 8086
 
 spring:
   application:
     name: settings-cms-service
 
   datasource:
-    # url: jdbc:mysql://localhost:3306/qlkh?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Ho_Chi_Minh
     url: jdbc:mysql://localhost:3306/qlkh?allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=UTC
-    username: root          # sửa đúng user
-    password: Viethien1@ # sửa đúng pass
+    username: root         
+    password: Viethien1@ 
     driver-class-name: com.mysql.cj.jdbc.Driver
 
   jpa:

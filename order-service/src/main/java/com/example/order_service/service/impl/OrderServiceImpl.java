@@ -33,7 +33,7 @@ public class OrderServiceImpl implements OrderService {
     @Override
     public OrderDto create(OrderRequest req) {
 
-        // 0. TÍNH SUBTOTAL (tổng tiền hàng)
+        // TÍNH SUBTOTAL (tổng tiền hàng)
         double subtotal = 0.0;
         if (req.getDetails() != null) {
             for (OrderDetailRequest d : req.getDetails()) {
@@ -43,7 +43,7 @@ public class OrderServiceImpl implements OrderService {
             }
         }
 
-        // 1. GỌI PROMOTION-SERVICE NẾU CÓ voucherCode
+        // GỌI PROMOTION-SERVICE NẾU CÓ voucherCode
         double discount = 0.0;
 
         if (req.getVoucherCode() != null && !req.getVoucherCode().isBlank()) {
@@ -83,7 +83,7 @@ public class OrderServiceImpl implements OrderService {
                 ? req.getShipFee().doubleValue()
                 : 0.0;
 
-        // 👉 TỔNG TIỀN ĐƠN HÀNG = tiền hàng sau giảm + phí ship
+        //  TỔNG TIỀN ĐƠN HÀNG = tiền hàng sau giảm + phí ship
         double finalTotal = itemTotal + shipFeeDouble;
 
         // 2. lưu order
@@ -121,7 +121,7 @@ public class OrderServiceImpl implements OrderService {
             }
         }
 
-        // 3.5. GỌI INVENTORY-SERVICE TẠO PHIẾU XUẤT
+        // 3.2 GỌI INVENTORY-SERVICE TẠO PHIẾU XUẤT
         try {
             if (req.getDetails() != null && !req.getDetails().isEmpty()) {
 
@@ -201,7 +201,7 @@ public class OrderServiceImpl implements OrderService {
         dto.setOrderDate(o.getOrderDate());
         dto.setOrderStatus(o.getOrderStatus());
 
-        // 👉 map tổng tiền + giảm giá ra DTO
+        //  map tổng tiền + giảm giá ra DTO
         dto.setTotalAmount(o.getTotalAmount());
         dto.setDiscountAmount(o.getDiscountAmount());
 
