@@ -1,4 +1,4 @@
-package com.example.promotion_service.security; // auth-service thì đổi lại cho đúng package
+package com.example.promotion_service.security; 
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;

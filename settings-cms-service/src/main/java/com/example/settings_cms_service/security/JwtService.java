@@ -1,4 +1,4 @@
-package com.example.settings_cms_service.security; // auth-service thì đổi lại cho đúng package
+package com.example.settings_cms_service.security;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
