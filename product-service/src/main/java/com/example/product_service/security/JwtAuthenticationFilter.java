@@ -1,5 +1,4 @@
-// order-service/src/main/java/com/example/order_service/security/JwtAuthenticationFilter.java
-package com.example.order_service.security;
+package com.example.product_service.security;
 
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;

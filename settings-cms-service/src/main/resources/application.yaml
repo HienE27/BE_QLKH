@@ -18,6 +18,10 @@ spring:
     properties:
       hibernate.format_sql: true
 
+jwt:
+  secret: this-is-my-ultra-long-jwt-secret-key-1234567890
+  expiration-ms: 86400000
+
 eureka:
   client:
     service-url:

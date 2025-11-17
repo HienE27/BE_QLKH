@@ -1,46 +1,41 @@
 package com.example.auth_service.security;
 
-import com.example.auth_service.entity.AdRole;
 import com.example.auth_service.entity.AdUser;
+import com.example.auth_service.entity.AdRole;
 import com.example.auth_service.repository.AdUserRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.*;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
+@RequiredArgsConstructor
 public class CustomUserDetailsService implements UserDetailsService {
 
     private final AdUserRepository userRepository;
 
-    public CustomUserDetailsService(AdUserRepository userRepository) {
-        this.userRepository = userRepository;
-    }
-
     @Override
-    public UserDetails loadUserByUsername(String username)
-            throws UsernameNotFoundException {
-
+    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
         AdUser user = userRepository.findByUsername(username)
-                .orElseThrow(() ->
-                        new UsernameNotFoundException("User not found: " + username));
+                .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
 
-        boolean enabled = user.getActive() == null || Boolean.TRUE.equals(user.getActive());
+        Set<AdRole> roles = user.getRoles();
+        List<GrantedAuthority> authorities = roles.stream()
+                .map(role -> new SimpleGrantedAuthority(role.getRoleCode()))
+                .collect(Collectors.toList());
 
-        List<SimpleGrantedAuthority> authorities = user.getRoles().stream()
-                .map(AdRole::getRoleCode)
-                .map(code -> new SimpleGrantedAuthority("ROLE_" + code))
-                .toList();
+        boolean enabled = Boolean.TRUE.equals(user.getActive());
 
-        return new org.springframework.security.core.userdetails.User(
-                user.getUsername(),
-                user.getPassword(),
-                enabled,
-                true,
-                true,
-                true,
-                authorities
-        );
+        return User.withUsername(user.getUsername())
+                .password(user.getPassword())
+                .authorities(authorities)
+                .accountLocked(!enabled)
+                .disabled(!enabled)
+                .build();
     }
 }

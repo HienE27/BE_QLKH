@@ -1,4 +1,4 @@
-package com.example.order_service.security;
+package com.example.settings_cms_service.security;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;

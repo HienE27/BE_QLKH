@@ -44,10 +44,10 @@ spring:
             - Path=/api/vouchers,/api/vouchers/**
 
         # #SETTING SERVICE
-        #  - id: settings-cms-service
-        #   uri: lb://setting-cms-service
-        #   predicates:
-        #     - Path=/api/settings/**, /api/post-categories/**, /api/posts/**
+        - id: settings-cms-service
+          uri: lb://settings-cms-service
+          predicates:
+            - Path=/api/settings/**, /api/post-categories/**, /api/posts/**
 
         # AUTH SERVICE
         - id: auth-service
@@ -56,7 +56,13 @@ spring:
             - Path=/api/auth/**
 
         
-              
+#       default-filters:
+#         - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin
+
+# jwt:
+#   secret: "this-is-my-ultra-long-jwt-secret-key-1234567890-ABCD-XYZ"
+
+
 eureka:
   client:
     service-url:
