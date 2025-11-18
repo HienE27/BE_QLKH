@@ -56,11 +56,25 @@ spring:
             - Path=/api/auth/**
 
         
-#       default-filters:
-#         - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin
+# CORS + header dedupe
+      default-filters:
+        - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_UNIQUE
 
-# jwt:
-#   secret: "this-is-my-ultra-long-jwt-secret-key-1234567890-ABCD-XYZ"
+      globalcors:
+        add-to-simple-url-handler-mapping: true
+        cors-configurations:
+          '[/**]':
+            allowedOrigins:
+              - "http://localhost:3000"   # FE Next.js
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - DELETE
+              - PATCH
+              - OPTIONS
+            allowedHeaders: "*"
+            allowCredentials: true
 
 
 eureka:
