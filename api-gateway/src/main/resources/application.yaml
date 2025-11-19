@@ -10,40 +10,47 @@ spring:
       discovery:
         locator:
           enabled: true
-          lower-case-service-id: true  # tên service viết thường
+          lower-case-service-id: true
 
+        # ✅ THÊM ROUTE CHO UPLOADS - PHẢI ĐẶT TRƯỚC ROUTE PRODUCT SERVICE
       routes:
+        - id: product-uploads
+          uri: lb://product-service
+          predicates:
+            - Path=/uploads/products/**
+          filters:
+            - RemoveRequestHeader=Cookie  # Bỏ Cookie để tránh CORS issues
+
         # PRODUCT SERVICE
         - id: product-service
           uri: lb://product-service
           predicates:
-            - Path=/api/products,/api/products/**,
-                  /api/categories,/api/categories/**,
-                  /api/suppliers,/api/suppliers/**
+            - Path=/api/products/**,
+                  /api/categories/**,
+                  /api/suppliers/**
 
-
-        # INVENTORY SERVICE (store + import)
+        # INVENTORY SERVICE
         - id: inventory-service
           uri: lb://inventory-service
           predicates:
-            - Path=/api/stores,/api/stores/**,
-                   /api/imports,/api/imports/**,
-                   /api/exports,/api/exports/**,
-                   /api/stocks,/api/stocks/**
+            - Path=/api/stores/**,
+                   /api/imports/**,
+                   /api/exports/**,
+                   /api/stocks/**
 
-        # ORDER SERVICE (customer + order)
+        # ORDER SERVICE
         - id: order-service
           uri: lb://order-service
           predicates:
-            - Path=/api/customers,/api/customers/**,/api/orders,/api/orders/**
+            - Path=/api/customers/**,/api/orders/**
 
         # PROMOTION SERVICE
         - id: promotion-service
           uri: lb://promotion-service
           predicates:
-            - Path=/api/vouchers,/api/vouchers/**
+            - Path=/api/vouchers/**
 
-        # #SETTING SERVICE
+        # SETTING SERVICE
         - id: settings-cms-service
           uri: lb://settings-cms-service
           predicates:
@@ -55,8 +62,6 @@ spring:
           predicates:
             - Path=/api/auth/**
 
-        
-# CORS + header dedupe
       default-filters:
         - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_UNIQUE
 
@@ -65,7 +70,7 @@ spring:
         cors-configurations:
           '[/**]':
             allowedOrigins:
-              - "http://localhost:3000"   # FE Next.js
+              - "http://localhost:3000"
             allowedMethods:
               - GET
               - POST
@@ -75,7 +80,6 @@ spring:
               - OPTIONS
             allowedHeaders: "*"
             allowCredentials: true
-
 
 eureka:
   client:

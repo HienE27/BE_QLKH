@@ -22,7 +22,13 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/actuator/**").permitAll() // nếu có health check
+                        // ✅ Cho phép public access vào static files (uploads)
+                        .requestMatchers("/uploads/**").permitAll()
+                        
+                        // ✅ Cho phép health check
+                        .requestMatchers("/actuator/**").permitAll()
+                        
+                        // ✅ Tất cả API khác cần authenticate
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
