@@ -8,6 +8,9 @@ import com.example.product_service.entity.ShopProductImage;
 import com.example.product_service.service.ShopProductDiscountService;
 import com.example.product_service.service.ShopProductImageService;
 import com.example.product_service.service.ShopProductService;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -17,6 +20,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -31,12 +35,27 @@ public class ShopProductController {
     // Thư mục lưu file trong container / server
     private final Path uploadDir = Paths.get("uploads/products");
 
+    // ✅ Constructor duy nhất
     public ShopProductController(ShopProductService productService,
                                  ShopProductImageService imageService,
                                  ShopProductDiscountService discountService) {
         this.productService = productService;
         this.imageService = imageService;
         this.discountService = discountService;
+    }
+
+    // ✅ LIST + FILTER + PAGINATION (path riêng: /api/products/search)
+    @GetMapping("/search")
+    public Page<ProductDto> search(
+            @RequestParam(required = false) String code,
+            @RequestParam(required = false) String name,
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
+            Pageable pageable
+    ) {
+        return productService.search(code, name, fromDate, toDate, pageable);
     }
 
     // ====== PRODUCTS ======
@@ -82,40 +101,39 @@ public class ShopProductController {
 
     // ====== UPLOAD HÌNH ẢNH ======
 
-@PostMapping(
-    value = "/upload-image",
-    consumes = MediaType.MULTIPART_FORM_DATA_VALUE
-)
-public ApiResponse<String> uploadImage(@RequestParam("file") MultipartFile file) {
-    if (file.isEmpty()) {
-        throw new IllegalArgumentException("File rỗng");
-    }
-
-    try {
-        if (!Files.exists(uploadDir)) {
-            Files.createDirectories(uploadDir);
+    @PostMapping(
+            value = "/upload-image",
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE
+    )
+    public ApiResponse<String> uploadImage(@RequestParam("file") MultipartFile file) {
+        if (file.isEmpty()) {
+            throw new IllegalArgumentException("File rỗng");
         }
 
-        String originalName = file.getOriginalFilename();
-        String ext = "";
-        if (originalName != null) {
-            int dot = originalName.lastIndexOf('.');
-            if (dot >= 0) {
-                ext = originalName.substring(dot);
+        try {
+            if (!Files.exists(uploadDir)) {
+                Files.createDirectories(uploadDir);
             }
+
+            String originalName = file.getOriginalFilename();
+            String ext = "";
+            if (originalName != null) {
+                int dot = originalName.lastIndexOf('.');
+                if (dot >= 0) {
+                    ext = originalName.substring(dot);
+                }
+            }
+
+            String newName = UUID.randomUUID() + ext;
+            Path target = uploadDir.resolve(newName);
+
+            Files.copy(file.getInputStream(), target, StandardCopyOption.REPLACE_EXISTING);
+
+            String storedUrl = "/uploads/products/" + newName;
+
+            return ApiResponse.ok("Uploaded", storedUrl);
+        } catch (IOException e) {
+            throw new RuntimeException("Không lưu được file ảnh", e);
         }
-
-        String newName = UUID.randomUUID() + ext;
-        Path target = uploadDir.resolve(newName);
-
-        Files.copy(file.getInputStream(), target, StandardCopyOption.REPLACE_EXISTING);
-
-        // ✅ Trả về relative URL để FE tự thêm domain
-        String storedUrl = "/uploads/products/" + newName;
-
-        return ApiResponse.ok("Uploaded", storedUrl);
-    } catch (IOException e) {
-        throw new RuntimeException("Không lưu được file ảnh", e);
     }
-}
 }

@@ -19,4 +19,9 @@ public class ProductDto {
     private Long supplierId;
     private Date createdAt;
     private Date updatedAt;
+
+    private String categoryName;  // <── THÊM MỚI
+
 }
+
+

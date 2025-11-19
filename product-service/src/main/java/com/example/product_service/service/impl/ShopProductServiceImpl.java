@@ -5,9 +5,15 @@ import com.example.product_service.dto.ProductRequest;
 import com.example.product_service.entity.ShopProduct;
 import com.example.product_service.exception.NotFoundException;
 import com.example.product_service.repository.ShopProductRepository;
+import com.example.product_service.repository.ShopCategoryRepository;
 import com.example.product_service.service.ShopProductService;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.Date;
 import java.util.List;
 
@@ -15,9 +21,13 @@ import java.util.List;
 public class ShopProductServiceImpl implements ShopProductService {
 
     private final ShopProductRepository repo;
+    private final ShopCategoryRepository categoryRepo;
 
-    public ShopProductServiceImpl(ShopProductRepository repo) {
+    // ✅ CHỈ 1 CONSTRUCTOR, TIÊM CẢ 2 REPO
+    public ShopProductServiceImpl(ShopProductRepository repo,
+                                  ShopCategoryRepository categoryRepo) {
         this.repo = repo;
+        this.categoryRepo = categoryRepo;
     }
 
     @Override
@@ -61,6 +71,48 @@ public class ShopProductServiceImpl implements ShopProductService {
         repo.deleteById(id);
     }
 
+    // ✅ search + phân trang
+    @Override
+    public Page<ProductDto> search(String code,
+                                   String name,
+                                   LocalDate fromDate,
+                                   LocalDate toDate,
+                                   Pageable pageable) {
+
+        Specification<ShopProduct> spec = Specification.where(null);
+
+        if (code != null && !code.isBlank()) {
+            String likeCode = "%" + code.toLowerCase().trim() + "%";
+            spec = spec.and((root, query, cb) ->
+                    cb.like(cb.lower(root.get("code")), likeCode));
+        }
+
+        if (name != null && !name.isBlank()) {
+            String likeName = "%" + name.toLowerCase().trim() + "%";
+            spec = spec.and((root, query, cb) ->
+                    cb.like(cb.lower(root.get("name")), likeName));
+        }
+
+        if (fromDate != null) {
+            Date from = Date.from(
+                    fromDate.atStartOfDay(ZoneId.systemDefault()).toInstant()
+            );
+            spec = spec.and((root, query, cb) ->
+                    cb.greaterThanOrEqualTo(root.get("createdAt"), from));
+        }
+
+        if (toDate != null) {
+            Date to = Date.from(
+                    toDate.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant()
+            );
+            spec = spec.and((root, query, cb) ->
+                    cb.lessThan(root.get("createdAt"), to));
+        }
+
+        return repo.findAll(spec, pageable)
+                .map(this::toDto);
+    }
+
     // --------- mapping helpers ---------
     private ProductDto toDto(ShopProduct p) {
         ProductDto dto = new ProductDto();
@@ -76,6 +128,13 @@ public class ShopProductServiceImpl implements ShopProductService {
         dto.setSupplierId(p.getSupplierId());
         dto.setCreatedAt(p.getCreatedAt());
         dto.setUpdatedAt(p.getUpdatedAt());
+
+        // ⭐ LẤY CATEGORY NAME
+        if (p.getCategoryId() != null) {
+            categoryRepo.findById(p.getCategoryId())
+                    .ifPresent(cat -> dto.setCategoryName(cat.getName()));
+        }
+
         return dto;
     }
 

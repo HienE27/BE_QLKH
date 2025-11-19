@@ -5,6 +5,12 @@ import com.example.product_service.dto.ProductRequest;
 
 import java.util.List;
 
+import java.time.LocalDate;
+
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+
+
 public interface ShopProductService {
 
     List<ProductDto> getAll();
@@ -16,4 +22,11 @@ public interface ShopProductService {
     ProductDto update(Long id, ProductRequest request);
 
     void delete(Long id);
+
+        // search + phân trang
+    Page<ProductDto> search(String code,
+                            String name,
+                            LocalDate fromDate,
+                            LocalDate toDate,
+                            Pageable pageable);
 }
