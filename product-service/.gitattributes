@@ -1,0 +1,21 @@
+# Unix line endings for shell scripts
+/mvnw text eol=lf
+
+# Windows line endings for batch files
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Java source files should use LF
+*.java text eol=lf
+
+# Text files should use LF
+*.txt text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.properties text eol=lf
+*.xml text eol=lf
+*.json text eol=lf
+
+# Default behavior for text files
+* text=auto

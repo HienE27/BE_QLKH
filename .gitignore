@@ -1,0 +1,10 @@
+# Root-level ignores shared by all backend services
+.env
+.env.*
+
+# Node/Java artifacts that tend to appear during development
+node_modules/
+**/target/
+**/.idea/
+**/.vscode/
+

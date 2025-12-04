@@ -1,0 +1,33 @@
+server:
+  port: 8090
+
+spring:
+  application:
+    name: ai-service
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://discovery-server:8761/eureka
+
+jwt:
+  secret: this-is-my-ultra-long-jwt-secret-key-Viethien1@7890
+  expiration-ms: 86400000
+
+gemini:
+  api-key: ${GEMINI_API_KEY:}
+
+milvus:
+  host: ${MILVUS_HOST:localhost}
+  port: ${MILVUS_PORT:19530}
+  collection:
+    name: receipt_embeddings
+  inventory:
+    collection:
+      name: inventory_snapshots
+
+api:
+  gateway:
+    url: http://api-gateway:8080
+
+

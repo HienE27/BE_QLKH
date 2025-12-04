@@ -1,0 +1,102 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+
+  cloud:
+    gateway:
+      discovery:
+        locator:
+          enabled: true
+          lower-case-service-id: true  # tên service viết thường
+
+      routes:
+        # ✅ ROUTE CHO UPLOADS - PHẢI ĐẶT TRƯỚC ROUTE PRODUCT SERVICE
+        - id: product-uploads
+          uri: lb://product-service
+          predicates:
+            - Path=/uploads/products/**
+          filters:
+            - RemoveRequestHeader=Cookie  # Bỏ Cookie để tránh CORS issues
+
+        # PRODUCT SERVICE
+        - id: product-service
+          uri: lb://product-service
+          predicates:
+            - Path=/api/products,/api/products/**,
+                  /api/categories,/api/categories/**,
+                  /api/suppliers,/api/suppliers/**,
+                  /api/units,/api/units/**
+        - id: ai-service
+          uri: lb://ai-service
+          predicates:
+            - Path=/api/ai/**
+
+        # INVENTORY SERVICE (store + import + dashboard)
+        - id: inventory-service
+          uri: lb://inventory-service
+          predicates:
+            - Path=/api/stores,/api/stores/**,
+                   /api/imports,/api/imports/**,
+                   /api/exports,/api/exports/**,
+                   /api/stocks,/api/stocks/**,
+                   /api/inventory-checks,/api/inventory-checks/**,
+                   /api/dashboard,/api/dashboard/**
+
+        # ORDER SERVICE (customer + order)
+        - id: order-service
+          uri: lb://order-service
+          predicates:
+            - Path=/api/customers,/api/customers/**,
+                   /api/orders,/api/orders/**
+
+        # PROMOTION SERVICE
+        - id: promotion-service
+          uri: lb://promotion-service
+          predicates:
+            - Path=/api/vouchers,/api/vouchers/**
+
+        # SETTING SERVICE
+        - id: settings-cms-service
+          uri: lb://settings-cms-service
+          predicates:
+            - Path=/api/settings/**,/api/post-categories/**,/api/posts/**
+
+        # AUTH SERVICE
+        - id: auth-service
+          uri: lb://auth-service
+          predicates:
+            - Path=/api/auth/**
+
+        # AI SERVICE
+        - id: ai-service
+          uri: lb://ai-service
+          predicates:
+            - Path=/api/ai,/api/ai/**
+
+      # CORS + header dedupe
+      default-filters:
+        - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_UNIQUE
+
+      globalcors:
+        add-to-simple-url-handler-mapping: true
+        cors-configurations:
+          '[/**]':
+            allowedOrigins:
+              - "http://localhost:3000"   # FE Next.js
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - DELETE
+              - PATCH
+              - OPTIONS
+            allowedHeaders: "*"
+            allowCredentials: true
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://discovery-server:8761/eureka
