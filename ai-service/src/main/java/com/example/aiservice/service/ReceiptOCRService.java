@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -32,7 +33,7 @@ public class ReceiptOCRService {
     private String apiKey;
 
     private static final Duration TIMEOUT = Duration.ofSeconds(60);
-    private static final String MODEL_PATH = "/models/gemini-2.0-flash-001:generateContent";
+    private static final String MODEL_PATH = "/models/gemini-2.5-flash:generateContent";
 
     /**
      * Đọc ảnh phiếu nhập/xuất và trích xuất thông tin
@@ -154,6 +155,19 @@ public class ReceiptOCRService {
             return text;
         } catch (WebClientResponseException ex) {
             log.error("Gemini HTTP error {} - {}", ex.getStatusCode(), ex.getResponseBodyAsString(), ex);
+            
+            // Xử lý riêng cho lỗi 429 (Quota Exceeded)
+            if (ex.getStatusCode() == HttpStatus.TOO_MANY_REQUESTS) {
+                String errorBody = ex.getResponseBodyAsString();
+                log.error("Gemini API quota exceeded. Response: {}", errorBody);
+                throw new RuntimeException(
+                    "Đã vượt quá hạn mức sử dụng Gemini API. " +
+                    "Free tier có giới hạn ~20 requests/ngày. " +
+                    "Vui lòng set up billing trong Google AI Studio để tăng quota " +
+                    "(https://aistudio.google.com/usage) hoặc đợi đến ngày mai để quota reset."
+                );
+            }
+            
             throw new RuntimeException("Gemini API error: " + ex.getStatusCode());
         } catch (Exception ex) {
             log.error("Gemini invocation failed", ex);

@@ -25,7 +25,7 @@ public class GeminiService {
     private String apiKey;
 
     private static final Duration TIMEOUT = Duration.ofSeconds(30);
-    private static final String MODEL_PATH = "/models/gemini-2.0-flash-001:generateContent";
+    private static final String MODEL_PATH = "/models/gemini-2.5-flash:generateContent";
 
     public String invokeGemini(String prompt) {
         if (apiKey == null || apiKey.isBlank()) {
@@ -68,6 +68,19 @@ public class GeminiService {
             return text.trim();
         } catch (WebClientResponseException ex) {
             log.error("Gemini HTTP error {} - {}", ex.getStatusCode(), ex.getResponseBodyAsString(), ex);
+            
+            // Xử lý riêng cho lỗi 429 (Quota Exceeded)
+            if (ex.getStatusCode() == HttpStatus.TOO_MANY_REQUESTS) {
+                String errorBody = ex.getResponseBodyAsString();
+                log.error("Gemini API quota exceeded. Response: {}", errorBody);
+                throw new RuntimeException(
+                    "Đã vượt quá hạn mức sử dụng Gemini API. " +
+                    "Free tier có giới hạn ~20 requests/ngày. " +
+                    "Vui lòng set up billing trong Google AI Studio để tăng quota " +
+                    "(https://aistudio.google.com/usage) hoặc đợi đến ngày mai để quota reset."
+                );
+            }
+            
             throw new RuntimeException("Gemini API error: " + ex.getStatusCode());
         } catch (Exception ex) {
             log.error("Gemini invocation failed", ex);
