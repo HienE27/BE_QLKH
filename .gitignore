@@ -2,6 +2,15 @@
 .env
 .env.*
 
+
+# Docker volumes - KHÔNG commit
+volumes/
+volumes/*
+volumes/etcd/
+volumes/minio/
+volumes/milvus/
+
+
 # Node/Java artifacts that tend to appear during development
 node_modules/
 **/target/
