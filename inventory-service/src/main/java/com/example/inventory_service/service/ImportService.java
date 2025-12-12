@@ -39,5 +39,9 @@ public interface ImportService {
 
     List<SupplierImportDto> getAll();
 
+    Page<SupplierImportDto> getAll(Pageable pageable);
+
     List<SupplierImportDto> getByStore(Long storeId);
+
+    Page<SupplierImportDto> getByStore(Long storeId, Pageable pageable);
 }

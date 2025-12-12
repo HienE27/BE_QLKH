@@ -2,24 +2,33 @@ package com.example.inventory_service.service;
 
 import com.example.inventory_service.dto.SupplierExportDto;
 import com.example.inventory_service.dto.SupplierExportRequest;
+import com.example.inventory_service.entity.ExportStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
 import java.time.LocalDate;
-import java.util.List;
+import java.time.LocalDateTime;
 
 public interface ExportService {
 
     SupplierExportDto create(SupplierExportRequest req);
 
-    List<SupplierExportDto> search(String status, String code, LocalDate from, LocalDate to);
+    Page<SupplierExportDto> search(ExportStatus status, String code, LocalDate from, LocalDate to, Pageable pageable);
 
-    Page<SupplierExportDto> searchPaged(String status,
+    Page<SupplierExportDto> searchPaged(ExportStatus status,
                                         String code,
                                         LocalDate from,
                                         LocalDate to,
                                         String sortField,
                                         String sortDir,
+                                        Pageable pageable);
+
+    Page<SupplierExportDto> searchKeyset(ExportStatus status,
+                                        String code,
+                                        LocalDate from,
+                                        LocalDate to,
+                                        LocalDateTime lastDate,
+                                        Long lastId,
                                         Pageable pageable);
 
     SupplierExportDto getById(Long id);
@@ -37,9 +46,9 @@ public interface ExportService {
 
     SupplierExportDto reject(Long id);
 
-    List<SupplierExportDto> getAll();
+    Page<SupplierExportDto> getAll(Pageable pageable);
 
-    List<SupplierExportDto> getByStore(Long storeId);
+    Page<SupplierExportDto> getByStore(Long storeId, Pageable pageable);
 
-    List<SupplierExportDto> getByOrder(Long orderId);
+    Page<SupplierExportDto> getByOrder(Long orderId, Pageable pageable);
 }

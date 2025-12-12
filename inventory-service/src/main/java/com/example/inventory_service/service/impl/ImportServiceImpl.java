@@ -5,6 +5,8 @@ import com.example.inventory_service.dto.ImportDetailDto;
 import com.example.inventory_service.dto.ImportDetailRequest;
 import com.example.inventory_service.dto.SupplierImportDto;
 import com.example.inventory_service.dto.SupplierImportRequest;
+import com.example.inventory_service.entity.ImportStatus;
+import com.example.inventory_service.entity.ImportType;
 import com.example.inventory_service.entity.ShopImport;
 import com.example.inventory_service.entity.ShopImportDetail;
 import com.example.inventory_service.exception.NotFoundException;
@@ -13,6 +15,8 @@ import com.example.inventory_service.repository.ShopImportRepository;
 import com.example.inventory_service.repository.ShopStockRepository;
 import com.example.inventory_service.entity.ShopStock;
 import com.example.inventory_service.service.ImportService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -20,17 +24,22 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.sql.Date;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
 public class ImportServiceImpl implements ImportService {
+
+    private static final Logger logger = LoggerFactory.getLogger(ImportServiceImpl.class);
 
     private final ShopImportRepository importRepo;
     private final ShopImportDetailRepository detailRepo;
@@ -65,8 +74,6 @@ public class ImportServiceImpl implements ImportService {
             throw new IllegalArgumentException("Phiếu nhập kho bắt buộc phải có nhà cung cấp");
         }
 
-        java.util.Date now = new java.util.Date();
-
         ShopImport im = new ShopImport();
 
         if (request.getCode() != null && !request.getCode().isBlank()) {
@@ -76,14 +83,20 @@ public class ImportServiceImpl implements ImportService {
         }
 
         // Lấy supplier type để set vào importType
-        String importType = "SUPPLIER"; // Default
+        ImportType importType = ImportType.SUPPLIER; // Default
         try {
             var supplierInfo = productClient.getSupplier(request.getSupplierId());
             if (supplierInfo != null && supplierInfo.getType() != null) {
-                importType = supplierInfo.getType(); // NCC, INTERNAL, STAFF, ...
+                // Convert String to ImportType enum
+                String typeStr = supplierInfo.getType();
+                try {
+                    importType = ImportType.valueOf(typeStr);
+                } catch (IllegalArgumentException e) {
+                    logger.warn("Unknown supplier type: {}, using default SUPPLIER", typeStr);
+                }
             }
         } catch (Exception ex) {
-            System.err.println("⚠️ Failed to get supplier type, using default SUPPLIER: " + ex.getMessage());
+            logger.warn("Failed to get supplier type, using default SUPPLIER: {}", ex.getMessage());
         }
         im.setImportType(importType);
         im.setStoreId(request.getStoreId());
@@ -92,7 +105,8 @@ public class ImportServiceImpl implements ImportService {
 
         im.setNote(limitNote(request.getNote()));
         im.setDescription(request.getDescription());
-        im.setStatus("PENDING");
+        im.setStatus(ImportStatus.PENDING);
+        LocalDateTime now = LocalDateTime.now();
         im.setImportsDate(now);
         im.setCreatedAt(now);
         im.setUpdatedAt(now);
@@ -165,18 +179,27 @@ public class ImportServiceImpl implements ImportService {
     @Override
     @Transactional(readOnly = true)
     public List<SupplierImportDto> search(String status, String code, LocalDate from, LocalDate to) {
-        Date fromDate = from != null ? Date.valueOf(from) : null;
-        Date toDate = to != null ? Date.valueOf(to.plusDays(1)) : null;
+        ImportStatus statusEnum = null;
+        if (status != null && !status.isBlank()) {
+            try {
+                statusEnum = ImportStatus.valueOf(status.toUpperCase());
+            } catch (IllegalArgumentException e) {
+                logger.warn("Invalid import status: {}", status);
+            }
+        }
+        LocalDateTime fromDate = from != null ? from.atStartOfDay() : null;
+        LocalDateTime toDate = to != null ? to.plusDays(1).atStartOfDay() : null;
 
-        // Sử dụng phương thức search gộp tất cả loại
-        List<ShopImport> list = importRepo.searchAllImports(
-                status,
+        // Use paginated search with large page size
+        Page<ShopImport> page = importRepo.searchAllImportsPaged(
+                statusEnum,
                 code,
                 fromDate,
-                toDate);
+                toDate,
+                org.springframework.data.domain.PageRequest.of(0, 1000)); // Limit to 1000 records
 
         List<SupplierImportDto> result = new ArrayList<>();
-        for (ShopImport im : list) {
+        for (ShopImport im : page.getContent()) {
             result.add(toDtoWithCalcTotal(im));
         }
         return result;
@@ -191,74 +214,69 @@ public class ImportServiceImpl implements ImportService {
                                                String sortField,
                                                String sortDir,
                                                Pageable pageable) {
-        Date fromDate = from != null ? Date.valueOf(from) : null;
-        Date toDate = to != null ? Date.valueOf(to.plusDays(1)) : null;
+        long startTime = System.currentTimeMillis();
+        ImportStatus statusEnum = null;
+        if (status != null && !status.isBlank()) {
+            try {
+                statusEnum = ImportStatus.valueOf(status.toUpperCase());
+            } catch (IllegalArgumentException e) {
+                logger.warn("Invalid import status: {}", status);
+            }
+        }
+        LocalDateTime fromDate = from != null ? from.atStartOfDay() : null;
+        LocalDateTime toDate = to != null ? to.plusDays(1).atStartOfDay() : null;
 
-        // Lấy toàn bộ danh sách đã lọc theo status, code, ngày
-        List<ShopImport> imports = importRepo.searchAllImports(
-                status,
+        Page<ShopImport> importPage = importRepo.searchAllImportsPaged(
+                statusEnum,
                 code,
                 fromDate,
-                toDate
+                toDate,
+                pageable
         );
 
-        // Sort theo ngày hoặc giá trị
-        Comparator<ShopImport> comparator;
-        if ("value".equalsIgnoreCase(sortField)) {
-            // Tính totalValue từ details để sort
-            comparator = Comparator.comparing(
-                    (ShopImport im) -> {
-                        List<ShopImportDetail> details = detailRepo.findByImportId(im.getId());
-                        BigDecimal total = BigDecimal.ZERO;
-                        if (details != null) {
-                            for (ShopImportDetail d : details) {
-                                if (d.getUnitPrice() == null || d.getQuantity() == null) continue;
-                                BigDecimal line = d.getUnitPrice().multiply(BigDecimal.valueOf(d.getQuantity()));
-                                if (d.getDiscountPercent() != null && d.getDiscountPercent().compareTo(BigDecimal.ZERO) > 0) {
-                                    BigDecimal discountMultiplier = BigDecimal.ONE
-                                            .subtract(d.getDiscountPercent().divide(BigDecimal.valueOf(100), 4,
-                                                    java.math.RoundingMode.HALF_UP));
-                                    line = line.multiply(discountMultiplier);
-                                }
-                                total = total.add(line);
-                            }
-                        }
-                        return total;
-                    },
-                    Comparator.nullsFirst(BigDecimal::compareTo)
-            );
-        } else {
-            // Mặc định sort theo ngày nhập
-            comparator = Comparator.comparing(
-                    (ShopImport im) -> im.getImportsDate() != null ? im.getImportsDate().getTime() : 0L,
-                    Comparator.nullsFirst(Long::compareTo)
-            );
-        }
-        if ("desc".equalsIgnoreCase(sortDir)) {
-            comparator = comparator.reversed();
+        List<Long> importIds = importPage.getContent().stream()
+                .map(ShopImport::getId)
+                .filter(Objects::nonNull)
+                .toList();
+
+        Map<Long, BigDecimal> totalsMap = new HashMap<>();
+        Map<Long, List<ShopImportDetail>> detailsMap = new HashMap<>();
+        Map<Long, com.example.inventory_service.entity.ShopStore> storeMap = new HashMap<>();
+
+        if (!importIds.isEmpty()) {
+            detailRepo.sumTotalsByImportIds(importIds).forEach(row -> {
+                Long id = (Long) row[0];
+                BigDecimal total = (BigDecimal) row[1];
+                totalsMap.put(id, total);
+            });
+
+            List<ShopImportDetail> details = detailRepo.findByImportIdIn(importIds);
+            detailsMap = details.stream().collect(Collectors.groupingBy(ShopImportDetail::getImportId));
+
+            List<Long> storeIds = details.stream()
+                    .map(ShopImportDetail::getStoreId)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .toList();
+            if (!storeIds.isEmpty()) {
+                storeMap.putAll(storeRepo.findAllById(storeIds).stream()
+                        .collect(Collectors.toMap(com.example.inventory_service.entity.ShopStore::getId, Function.identity())));
+            }
         }
 
-        List<ShopImport> sorted = imports.stream()
-                .sorted(comparator)
-                .collect(Collectors.toList());
+        final Map<Long, List<ShopImportDetail>> detailsMapFinal = detailsMap;
+        final Map<Long, com.example.inventory_service.entity.ShopStore> storeMapFinal = storeMap;
+        List<SupplierImportDto> dtoPage = importPage.getContent().stream()
+                .map(im -> toDtoWithCalcTotal(
+                        im,
+                        detailsMapFinal.getOrDefault(im.getId(), List.of()),
+                        totalsMap.get(im.getId()),
+                        storeMapFinal))
+                .toList();
 
-        int pageSize = pageable.getPageSize();
-        int currentPage = pageable.getPageNumber();
-        int startItem = currentPage * pageSize;
-
-        List<ShopImport> pageContent;
-        if (startItem >= sorted.size()) {
-            pageContent = List.of();
-        } else {
-            int toIndex = Math.min(startItem + pageSize, sorted.size());
-            pageContent = sorted.subList(startItem, toIndex);
-        }
-
-        List<SupplierImportDto> dtoPage = pageContent.stream()
-                .map(this::toDtoWithCalcTotal)
-                .collect(Collectors.toList());
-
-        return new PageImpl<>(dtoPage, pageable, sorted.size());
+        logger.debug("Search paged query took {}ms, processed {} records",
+                System.currentTimeMillis() - startTime, importPage.getTotalElements());
+        return new PageImpl<>(dtoPage, pageable, importPage.getTotalElements());
     }
 
     @Override
@@ -284,15 +302,20 @@ public class ImportServiceImpl implements ImportService {
                 .orElseThrow(() -> new NotFoundException("Import not found: " + id));
 
         // Lấy supplier type để set vào importType
-        String importType = im.getImportType(); // Giữ nguyên nếu đã có
+        ImportType importType = im.getImportType(); // Giữ nguyên nếu đã có
         if (request.getSupplierId() != null) {
             try {
                 var supplierInfo = productClient.getSupplier(request.getSupplierId());
                 if (supplierInfo != null && supplierInfo.getType() != null) {
-                    importType = supplierInfo.getType(); // NCC, INTERNAL, STAFF, ...
+                    String typeStr = supplierInfo.getType();
+                    try {
+                        importType = ImportType.valueOf(typeStr);
+                    } catch (IllegalArgumentException e) {
+                        logger.warn("Unknown supplier type: {}, keeping existing type", typeStr);
+                    }
                 }
             } catch (Exception ex) {
-                System.err.println("⚠️ Failed to get supplier type: " + ex.getMessage());
+                logger.warn("Failed to get supplier type: {}", ex.getMessage());
             }
         }
         im.setImportType(importType);
@@ -307,7 +330,7 @@ public class ImportServiceImpl implements ImportService {
 
         im.setNote(limitNote(request.getNote()));
         im.setDescription(request.getDescription());
-        im.setUpdatedAt(new java.util.Date());
+        im.setUpdatedAt(LocalDateTime.now());
 
         // Cập nhật ảnh
         if (request.getAttachmentImages() != null && !request.getAttachmentImages().isEmpty()) {
@@ -374,17 +397,18 @@ public class ImportServiceImpl implements ImportService {
         ShopImport im = importRepo.findById(id)
                 .orElseThrow(() -> new NotFoundException("Import not found: " + id));
 
-        if (!"PENDING".equals(im.getStatus())) {
+        if (im.getStatus() != ImportStatus.PENDING) {
             throw new IllegalStateException("Chỉ có thể duyệt phiếu đang ở trạng thái PENDING");
         }
 
-        im.setStatus("APPROVED");
+        im.setStatus(ImportStatus.APPROVED);
         Long currentUserId = getCurrentUserId();
+        LocalDateTime now = LocalDateTime.now();
         if (currentUserId != null) {
             im.setApprovedBy(currentUserId);
-            im.setApprovedAt(new java.util.Date());
+            im.setApprovedAt(now);
         }
-        im.setUpdatedAt(new java.util.Date());
+        im.setUpdatedAt(now);
         im = importRepo.save(im);
 
         return toDtoWithCalcTotal(im);
@@ -396,17 +420,18 @@ public class ImportServiceImpl implements ImportService {
         ShopImport im = importRepo.findById(id)
                 .orElseThrow(() -> new NotFoundException("Import not found: " + id));
 
-        if (!"APPROVED".equals(im.getStatus())) {
+        if (im.getStatus() != ImportStatus.APPROVED) {
             throw new IllegalStateException("Chỉ có thể nhập kho khi phiếu đã được duyệt (APPROVED)");
         }
 
-        im.setStatus("IMPORTED");
+        im.setStatus(ImportStatus.IMPORTED);
         Long currentUserId = getCurrentUserId();
+        LocalDateTime now = LocalDateTime.now();
         if (currentUserId != null) {
             im.setImportedBy(currentUserId);
-            im.setImportedAt(new java.util.Date());
+            im.setImportedAt(now);
         }
-        im.setUpdatedAt(new java.util.Date());
+        im.setUpdatedAt(now);
         im = importRepo.save(im);
 
         // Cập nhật tồn kho vào shop_stocks
@@ -443,12 +468,12 @@ public class ImportServiceImpl implements ImportService {
         ShopImport im = importRepo.findById(id)
                 .orElseThrow(() -> new NotFoundException("Import not found: " + id));
 
-        if (!"PENDING".equals(im.getStatus())) {
+        if (im.getStatus() != ImportStatus.PENDING) {
             throw new IllegalStateException("Chỉ có thể hủy phiếu đang ở trạng thái PENDING");
         }
 
-        im.setStatus("CANCELLED");
-        im.setUpdatedAt(new java.util.Date());
+        im.setStatus(ImportStatus.CANCELLED);
+        im.setUpdatedAt(LocalDateTime.now());
         im = importRepo.save(im);
 
         return toDtoWithCalcTotal(im);
@@ -460,17 +485,18 @@ public class ImportServiceImpl implements ImportService {
         ShopImport im = importRepo.findById(id)
                 .orElseThrow(() -> new NotFoundException("Import not found: " + id));
 
-        if (!"PENDING".equals(im.getStatus())) {
+        if (im.getStatus() != ImportStatus.PENDING) {
             throw new IllegalStateException("Chỉ có thể từ chối phiếu đang ở trạng thái PENDING");
         }
 
-        im.setStatus("REJECTED");
+        im.setStatus(ImportStatus.REJECTED);
         Long currentUserId = getCurrentUserId();
+        LocalDateTime now = LocalDateTime.now();
         if (currentUserId != null) {
             im.setRejectedBy(currentUserId);
-            im.setRejectedAt(new java.util.Date());
+            im.setRejectedAt(now);
         }
-        im.setUpdatedAt(new java.util.Date());
+        im.setUpdatedAt(now);
         im = importRepo.save(im);
 
         return toDtoWithCalcTotal(im);
@@ -479,17 +505,200 @@ public class ImportServiceImpl implements ImportService {
     @Override
     @Transactional(readOnly = true)
     public List<SupplierImportDto> getAll() {
-        return importRepo.findAll().stream()
-                .map(this::toDtoWithCalcTotal)
+        // Dùng pagination với limit để tránh load toàn bộ
+        Page<ShopImport> importPage = importRepo.findAll(
+                org.springframework.data.domain.PageRequest.of(0, 100)); // Limit to 100 records
+
+        List<Long> importIds = importPage.getContent().stream()
+                .map(ShopImport::getId)
+                .filter(Objects::nonNull)
+                .toList();
+
+        // Batch fetch details và stores
+        Map<Long, BigDecimal> totalsMap = new HashMap<>();
+        Map<Long, List<ShopImportDetail>> detailsMap = new HashMap<>();
+        Map<Long, com.example.inventory_service.entity.ShopStore> storeMap = new HashMap<>();
+
+        if (!importIds.isEmpty()) {
+            detailRepo.sumTotalsByImportIds(importIds).forEach(row -> {
+                Long id = (Long) row[0];
+                BigDecimal total = (BigDecimal) row[1];
+                totalsMap.put(id, total);
+            });
+
+            List<ShopImportDetail> details = detailRepo.findByImportIdIn(importIds);
+            detailsMap = details.stream().collect(Collectors.groupingBy(ShopImportDetail::getImportId));
+
+            List<Long> storeIds = details.stream()
+                    .map(ShopImportDetail::getStoreId)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .toList();
+            if (!storeIds.isEmpty()) {
+                storeMap.putAll(storeRepo.findAllById(storeIds).stream()
+                        .collect(Collectors.toMap(com.example.inventory_service.entity.ShopStore::getId, Function.identity())));
+            }
+        }
+
+        final Map<Long, List<ShopImportDetail>> detailsMapFinal = detailsMap;
+        final Map<Long, com.example.inventory_service.entity.ShopStore> storeMapFinal = storeMap;
+        return importPage.getContent().stream()
+                .map(im -> toDtoWithCalcTotal(
+                        im,
+                        detailsMapFinal.getOrDefault(im.getId(), List.of()),
+                        totalsMap.get(im.getId()),
+                        storeMapFinal))
                 .toList();
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<SupplierImportDto> getByStore(Long storeId) {
-        return importRepo.findByStoreId(storeId).stream()
-                .map(this::toDtoWithCalcTotal)
+        // Dùng pagination với limit để tránh load quá nhiều records
+        Page<ShopImport> importPage = importRepo.findByStoreId(
+                storeId,
+                org.springframework.data.domain.PageRequest.of(0, 100)); // Limit to 100 records
+
+        List<Long> importIds = importPage.getContent().stream()
+                .map(ShopImport::getId)
+                .filter(Objects::nonNull)
                 .toList();
+
+        // Batch fetch details và stores
+        Map<Long, BigDecimal> totalsMap = new HashMap<>();
+        Map<Long, List<ShopImportDetail>> detailsMap = new HashMap<>();
+        Map<Long, com.example.inventory_service.entity.ShopStore> storeMap = new HashMap<>();
+
+        if (!importIds.isEmpty()) {
+            detailRepo.sumTotalsByImportIds(importIds).forEach(row -> {
+                Long id = (Long) row[0];
+                BigDecimal total = (BigDecimal) row[1];
+                totalsMap.put(id, total);
+            });
+
+            List<ShopImportDetail> details = detailRepo.findByImportIdIn(importIds);
+            detailsMap = details.stream().collect(Collectors.groupingBy(ShopImportDetail::getImportId));
+
+            List<Long> storeIds = details.stream()
+                    .map(ShopImportDetail::getStoreId)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .toList();
+            if (!storeIds.isEmpty()) {
+                storeMap.putAll(storeRepo.findAllById(storeIds).stream()
+                        .collect(Collectors.toMap(com.example.inventory_service.entity.ShopStore::getId, Function.identity())));
+            }
+        }
+
+        final Map<Long, List<ShopImportDetail>> detailsMapFinal = detailsMap;
+        final Map<Long, com.example.inventory_service.entity.ShopStore> storeMapFinal = storeMap;
+        return importPage.getContent().stream()
+                .map(im -> toDtoWithCalcTotal(
+                        im,
+                        detailsMapFinal.getOrDefault(im.getId(), List.of()),
+                        totalsMap.get(im.getId()),
+                        storeMapFinal))
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<SupplierImportDto> getAll(Pageable pageable) {
+        // Dùng pagination để tránh load toàn bộ
+        Page<ShopImport> importPage = importRepo.findAll(pageable);
+
+        List<Long> importIds = importPage.getContent().stream()
+                .map(ShopImport::getId)
+                .filter(Objects::nonNull)
+                .toList();
+
+        // Batch fetch details và stores
+        Map<Long, BigDecimal> totalsMap = new HashMap<>();
+        Map<Long, List<ShopImportDetail>> detailsMap = new HashMap<>();
+        Map<Long, com.example.inventory_service.entity.ShopStore> storeMap = new HashMap<>();
+
+        if (!importIds.isEmpty()) {
+            detailRepo.sumTotalsByImportIds(importIds).forEach(row -> {
+                Long id = (Long) row[0];
+                BigDecimal total = (BigDecimal) row[1];
+                totalsMap.put(id, total);
+            });
+
+            List<ShopImportDetail> details = detailRepo.findByImportIdIn(importIds);
+            detailsMap = details.stream().collect(Collectors.groupingBy(ShopImportDetail::getImportId));
+
+            List<Long> storeIds = details.stream()
+                    .map(ShopImportDetail::getStoreId)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .toList();
+            if (!storeIds.isEmpty()) {
+                storeMap.putAll(storeRepo.findAllById(storeIds).stream()
+                        .collect(Collectors.toMap(com.example.inventory_service.entity.ShopStore::getId, Function.identity())));
+            }
+        }
+
+        final Map<Long, List<ShopImportDetail>> detailsMapFinal = detailsMap;
+        final Map<Long, com.example.inventory_service.entity.ShopStore> storeMapFinal = storeMap;
+        List<SupplierImportDto> dtoPage = importPage.getContent().stream()
+                .map(im -> toDtoWithCalcTotal(
+                        im,
+                        detailsMapFinal.getOrDefault(im.getId(), List.of()),
+                        totalsMap.get(im.getId()),
+                        storeMapFinal))
+                .toList();
+
+        return new PageImpl<>(dtoPage, pageable, importPage.getTotalElements());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<SupplierImportDto> getByStore(Long storeId, Pageable pageable) {
+        // Dùng pagination để tránh load quá nhiều records
+        Page<ShopImport> importPage = importRepo.findByStoreId(storeId, pageable);
+
+        List<Long> importIds = importPage.getContent().stream()
+                .map(ShopImport::getId)
+                .filter(Objects::nonNull)
+                .toList();
+
+        // Batch fetch details và stores
+        Map<Long, BigDecimal> totalsMap = new HashMap<>();
+        Map<Long, List<ShopImportDetail>> detailsMap = new HashMap<>();
+        Map<Long, com.example.inventory_service.entity.ShopStore> storeMap = new HashMap<>();
+
+        if (!importIds.isEmpty()) {
+            detailRepo.sumTotalsByImportIds(importIds).forEach(row -> {
+                Long id = (Long) row[0];
+                BigDecimal total = (BigDecimal) row[1];
+                totalsMap.put(id, total);
+            });
+
+            List<ShopImportDetail> details = detailRepo.findByImportIdIn(importIds);
+            detailsMap = details.stream().collect(Collectors.groupingBy(ShopImportDetail::getImportId));
+
+            List<Long> storeIds = details.stream()
+                    .map(ShopImportDetail::getStoreId)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .toList();
+            if (!storeIds.isEmpty()) {
+                storeMap.putAll(storeRepo.findAllById(storeIds).stream()
+                        .collect(Collectors.toMap(com.example.inventory_service.entity.ShopStore::getId, Function.identity())));
+            }
+        }
+
+        final Map<Long, List<ShopImportDetail>> detailsMapFinal = detailsMap;
+        final Map<Long, com.example.inventory_service.entity.ShopStore> storeMapFinal = storeMap;
+        List<SupplierImportDto> dtoPage = importPage.getContent().stream()
+                .map(im -> toDtoWithCalcTotal(
+                        im,
+                        detailsMapFinal.getOrDefault(im.getId(), List.of()),
+                        totalsMap.get(im.getId()),
+                        storeMapFinal))
+                .toList();
+
+        return new PageImpl<>(dtoPage, pageable, importPage.getTotalElements());
     }
 
     // ========= HELPER METHODS ========= //
@@ -581,14 +790,21 @@ public class ImportServiceImpl implements ImportService {
 
     private SupplierImportDto toDtoWithCalcTotal(ShopImport im) {
         List<ShopImportDetail> details = detailRepo.findByImportId(im.getId());
-        BigDecimal total = BigDecimal.ZERO;
+        return toDtoWithCalcTotal(im, details, null, null);
+    }
+
+    private SupplierImportDto toDtoWithCalcTotal(
+            ShopImport im,
+            List<ShopImportDetail> details,
+            BigDecimal precomputedTotal,
+            Map<Long, com.example.inventory_service.entity.ShopStore> storeMap) {
+        BigDecimal total = precomputedTotal != null ? precomputedTotal : BigDecimal.ZERO;
         List<ImportDetailDto> itemDtos = new ArrayList<>();
 
         if (details != null) {
             for (ShopImportDetail d : details) {
-                if (d.getUnitPrice() == null || d.getQuantity() == null)
-                    continue;
-
+                if (precomputedTotal == null) { // Only calculate if not precomputed
+                    if (d.getUnitPrice() != null && d.getQuantity() != null) {
                 BigDecimal line = d.getUnitPrice().multiply(BigDecimal.valueOf(d.getQuantity()));
 
                 // Áp dụng chiết khấu nếu có
@@ -600,6 +816,8 @@ public class ImportServiceImpl implements ImportService {
                 }
 
                 total = total.add(line);
+                    }
+                }
 
                 ImportDetailDto itemDto = new ImportDetailDto();
                 itemDto.setId(d.getId());
@@ -614,8 +832,15 @@ public class ImportServiceImpl implements ImportService {
                 itemDto.setStoreName(null);
                 itemDto.setStoreCode(null);
 
-                // Lấy thông tin kho nếu có
-                if (d.getStoreId() != null) {
+                // Lấy thông tin kho từ map nếu có
+                if (d.getStoreId() != null && storeMap != null && !storeMap.isEmpty()) {
+                    com.example.inventory_service.entity.ShopStore store = storeMap.get(d.getStoreId());
+                    if (store != null) {
+                        itemDto.setStoreName(store.getName());
+                        itemDto.setStoreCode(store.getCode());
+                    }
+                } else if (d.getStoreId() != null) {
+                    // Fallback: query từ DB nếu không có trong map
                     storeRepo.findById(d.getStoreId()).ifPresent(store -> {
                         itemDto.setStoreName(store.getName());
                         itemDto.setStoreCode(store.getCode());
@@ -626,28 +851,41 @@ public class ImportServiceImpl implements ImportService {
             }
         }
 
-        SupplierImportDto dto = toDto(im, total);
+        SupplierImportDto dto = toDto(im, total, storeMap);
         dto.setItems(itemDtos);
         return dto;
     }
 
     private SupplierImportDto toDto(ShopImport imp, BigDecimal total) {
+        return toDto(imp, total, null);
+    }
+
+    private SupplierImportDto toDto(ShopImport imp, BigDecimal total, Map<Long, com.example.inventory_service.entity.ShopStore> storeMap) {
         SupplierImportDto dto = new SupplierImportDto();
         dto.setId(imp.getId());
         dto.setCode(imp.getCode());
         dto.setStoreId(imp.getStoreId());
         dto.setSupplierId(imp.getSupplierId());
-        dto.setStatus(imp.getStatus());
-        dto.setImportsDate(imp.getImportsDate());
+        dto.setStatus(imp.getStatus() != null ? imp.getStatus().name() : null);
+        dto.setImportsDate(imp.getImportsDate() != null ? 
+            java.sql.Timestamp.valueOf(imp.getImportsDate()) : null);
         dto.setNote(imp.getNote());
         dto.setTotalValue(total);
 
-        // Lấy thông tin kho đích
+        // Lấy thông tin kho đích từ map nếu có, hoặc query từ DB
         if (imp.getStoreId() != null) {
+            if (storeMap != null && !storeMap.isEmpty()) {
+                com.example.inventory_service.entity.ShopStore store = storeMap.get(imp.getStoreId());
+                if (store != null) {
+                    dto.setStoreName(store.getName());
+                    dto.setStoreCode(store.getCode());
+                }
+            } else {
             storeRepo.findById(imp.getStoreId()).ifPresent(store -> {
                 dto.setStoreName(store.getName());
                 dto.setStoreCode(store.getCode());
             });
+            }
         }
 
         // Phiếu nhập chỉ làm việc với NCC
@@ -677,15 +915,19 @@ public class ImportServiceImpl implements ImportService {
         }
         dto.setAttachmentImages(images);
 
-        // Map audit fields với userId và timestamp
+        // Map audit fields với userId và timestamp - convert LocalDateTime to Timestamp
         dto.setCreatedBy(imp.getCreatedBy());
-        dto.setCreatedAt(imp.getCreatedAt());
+        dto.setCreatedAt(imp.getCreatedAt() != null ? 
+            java.sql.Timestamp.valueOf(imp.getCreatedAt()) : null);
         dto.setApprovedBy(imp.getApprovedBy());
-        dto.setApprovedAt(imp.getApprovedAt());
+        dto.setApprovedAt(imp.getApprovedAt() != null ? 
+            java.sql.Timestamp.valueOf(imp.getApprovedAt()) : null);
         dto.setRejectedBy(imp.getRejectedBy());
-        dto.setRejectedAt(imp.getRejectedAt());
+        dto.setRejectedAt(imp.getRejectedAt() != null ? 
+            java.sql.Timestamp.valueOf(imp.getRejectedAt()) : null);
         dto.setImportedBy(imp.getImportedBy());
-        dto.setImportedAt(imp.getImportedAt());
+        dto.setImportedAt(imp.getImportedAt() != null ? 
+            java.sql.Timestamp.valueOf(imp.getImportedAt()) : null);
         
         // Lấy tên user và role từ userId
         try {

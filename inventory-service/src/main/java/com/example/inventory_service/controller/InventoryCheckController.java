@@ -34,6 +34,12 @@ public class InventoryCheckController {
                 "data", dto));
     }
 
+    /**
+     * @deprecated Use {@link #searchPaged(String, String, LocalDate, LocalDate, int, int)} instead.
+     * This endpoint returns a limited list (max 1000 records) and may not return all results.
+     * For better performance and pagination, use /api/inventory-checks/search with page and size parameters.
+     */
+    @Deprecated
     @GetMapping
     public ResponseEntity<?> search(
             @RequestParam(required = false) String status,

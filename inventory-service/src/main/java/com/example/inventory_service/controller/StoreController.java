@@ -5,6 +5,7 @@ import com.example.inventory_service.dto.StoreDto;
 import com.example.inventory_service.dto.StoreRequest;
 import com.example.inventory_service.service.StoreService;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.web.bind.annotation.*;
 
@@ -28,9 +29,23 @@ public class StoreController {
         return service.search(code, name, pageable);
     }
 
+    /**
+     * @deprecated Use paginated version {@link #getAllPaged(int, int)} instead.
+     * This endpoint returns a limited list (max 100 stores) and may not return all results.
+     */
+    @Deprecated
     @GetMapping
     public ApiResponse<List<StoreDto>> getAll() {
         return ApiResponse.ok(service.getAll());
+    }
+
+    @GetMapping("/paged")
+    public ApiResponse<Page<StoreDto>> getAllPaged(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        Pageable pageable = PageRequest.of(page, size);
+        Page<StoreDto> data = service.getAll(pageable);
+        return ApiResponse.ok(data);
     }
 
     @GetMapping("/{id:\\d+}")

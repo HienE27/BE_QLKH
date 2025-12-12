@@ -19,11 +19,17 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Service
 public class InventoryCheckServiceImpl implements InventoryCheckService {
+
+    private static final Logger logger = LoggerFactory.getLogger(InventoryCheckServiceImpl.class);
 
     private final InventoryCheckRepository checkRepo;
     private final InventoryCheckDetailRepository detailRepo;
@@ -156,17 +162,44 @@ public class InventoryCheckServiceImpl implements InventoryCheckService {
         Date fromDate = from != null ? java.sql.Date.valueOf(from) : null;
         Date toDate = to != null ? java.sql.Date.valueOf(to.plusDays(1)) : null;
 
-        List<InventoryCheck> list = checkRepo.searchInventoryChecks(
+        // Sử dụng pagination với limit để tránh load toàn bộ
+        Page<InventoryCheck> page = checkRepo.searchInventoryChecksPaged(
                 status,
                 checkCode,
                 fromDate,
-                toDate);
+                toDate,
+                org.springframework.data.domain.PageRequest.of(0, 1000)); // Limit to 1000 records
 
-        List<InventoryCheckDto> result = new ArrayList<>();
-        for (InventoryCheck check : list) {
-            result.add(toDtoWithCalcTotal(check));
+        List<Long> checkIds = page.getContent().stream()
+                .map(InventoryCheck::getId)
+                .filter(java.util.Objects::nonNull)
+                .toList();
+
+        // Batch fetch details để tránh N+1
+        Map<Long, List<InventoryCheckDetail>> detailsMap = new HashMap<>();
+        if (!checkIds.isEmpty()) {
+            List<InventoryCheckDetail> allDetails = detailRepo.findByInventoryCheckIdIn(checkIds);
+            detailsMap = allDetails.stream()
+                    .collect(Collectors.groupingBy(InventoryCheckDetail::getInventoryCheckId));
         }
-        return result;
+
+        // Batch fetch stores
+        Map<Long, com.example.inventory_service.entity.ShopStore> storeMap = new HashMap<>();
+        List<Long> storeIds = page.getContent().stream()
+                .map(InventoryCheck::getStoreId)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .toList();
+        if (!storeIds.isEmpty()) {
+            storeMap.putAll(storeRepo.findAllById(storeIds).stream()
+                    .collect(Collectors.toMap(com.example.inventory_service.entity.ShopStore::getId, java.util.function.Function.identity())));
+        }
+
+        final Map<Long, List<InventoryCheckDetail>> detailsMapFinal = detailsMap;
+        final Map<Long, com.example.inventory_service.entity.ShopStore> storeMapFinal = storeMap;
+        return page.getContent().stream()
+                .map(check -> toDtoWithCalcTotal(check, detailsMapFinal.getOrDefault(check.getId(), List.of()), storeMapFinal))
+                .toList();
     }
 
     @Override
@@ -177,22 +210,52 @@ public class InventoryCheckServiceImpl implements InventoryCheckService {
             LocalDate from,
             LocalDate to,
             Pageable pageable) {
-        // Dùng search() hiện tại rồi tự phân trang để tránh lỗi JPQL + Pageable
-        List<InventoryCheckDto> all = search(status, checkCode, from, to);
+        long startTime = System.currentTimeMillis();
+        Date fromDate = from != null ? java.sql.Date.valueOf(from) : null;
+        Date toDate = to != null ? java.sql.Date.valueOf(to.plusDays(1)) : null;
 
-        int pageSize = pageable.getPageSize();
-        int currentPage = pageable.getPageNumber();
-        int startItem = currentPage * pageSize;
+        // Dùng pagination trực tiếp từ repository
+        Page<InventoryCheck> checkPage = checkRepo.searchInventoryChecksPaged(
+                status,
+                checkCode,
+                fromDate,
+                toDate,
+                pageable);
 
-        List<InventoryCheckDto> content;
-        if (startItem >= all.size()) {
-            content = List.of();
-        } else {
-            int toIndex = Math.min(startItem + pageSize, all.size());
-            content = all.subList(startItem, toIndex);
+        List<Long> checkIds = checkPage.getContent().stream()
+                .map(InventoryCheck::getId)
+                .filter(java.util.Objects::nonNull)
+                .toList();
+
+        // Batch fetch details để tránh N+1
+        Map<Long, List<InventoryCheckDetail>> detailsMap = new HashMap<>();
+        if (!checkIds.isEmpty()) {
+            List<InventoryCheckDetail> allDetails = detailRepo.findByInventoryCheckIdIn(checkIds);
+            detailsMap = allDetails.stream()
+                    .collect(Collectors.groupingBy(InventoryCheckDetail::getInventoryCheckId));
         }
 
-        return new PageImpl<>(content, pageable, all.size());
+        // Batch fetch stores
+        Map<Long, com.example.inventory_service.entity.ShopStore> storeMap = new HashMap<>();
+        List<Long> storeIds = checkPage.getContent().stream()
+                .map(InventoryCheck::getStoreId)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .toList();
+        if (!storeIds.isEmpty()) {
+            storeMap.putAll(storeRepo.findAllById(storeIds).stream()
+                    .collect(Collectors.toMap(com.example.inventory_service.entity.ShopStore::getId, java.util.function.Function.identity())));
+        }
+
+        final Map<Long, List<InventoryCheckDetail>> detailsMapFinal = detailsMap;
+        final Map<Long, com.example.inventory_service.entity.ShopStore> storeMapFinal = storeMap;
+        List<InventoryCheckDto> dtoPage = checkPage.getContent().stream()
+                .map(check -> toDtoWithCalcTotal(check, detailsMapFinal.getOrDefault(check.getId(), List.of()), storeMapFinal))
+                .toList();
+
+        logger.debug("Search paged query took {}ms, processed {} records",
+                System.currentTimeMillis() - startTime, checkPage.getTotalElements());
+        return new PageImpl<>(dtoPage, pageable, checkPage.getTotalElements());
     }
 
     @Override
@@ -401,6 +464,13 @@ public class InventoryCheckServiceImpl implements InventoryCheckService {
 
     private InventoryCheckDto toDtoWithCalcTotal(InventoryCheck check) {
         List<InventoryCheckDetail> details = detailRepo.findByInventoryCheckId(check.getId());
+        return toDtoWithCalcTotal(check, details, null);
+    }
+
+    private InventoryCheckDto toDtoWithCalcTotal(
+            InventoryCheck check,
+            List<InventoryCheckDetail> details,
+            Map<Long, com.example.inventory_service.entity.ShopStore> storeMap) {
         BigDecimal totalDiff = BigDecimal.ZERO;
         List<InventoryCheckDetailDto> itemDtos = new ArrayList<>();
 
@@ -429,12 +499,19 @@ public class InventoryCheckServiceImpl implements InventoryCheckService {
             }
         }
 
-        InventoryCheckDto dto = toDto(check, totalDiff);
+        InventoryCheckDto dto = toDto(check, totalDiff, storeMap);
         dto.setItems(itemDtos);
         return dto;
     }
 
     private InventoryCheckDto toDto(InventoryCheck check, BigDecimal totalDiff) {
+        return toDto(check, totalDiff, null);
+    }
+
+    private InventoryCheckDto toDto(
+            InventoryCheck check,
+            BigDecimal totalDiff,
+            Map<Long, com.example.inventory_service.entity.ShopStore> storeMap) {
         InventoryCheckDto dto = new InventoryCheckDto();
         dto.setId(check.getId());
         dto.setCheckCode(check.getCheckCode());
@@ -453,11 +530,18 @@ public class InventoryCheckServiceImpl implements InventoryCheckService {
         dto.setNote(check.getNote());
         dto.setTotalDifferenceValue(totalDiff);
 
-        // Lấy thông tin kho
+        // Lấy thông tin kho từ map nếu có, hoặc query từ DB
         if (check.getStoreId() != null) {
+            if (storeMap != null && !storeMap.isEmpty()) {
+                com.example.inventory_service.entity.ShopStore store = storeMap.get(check.getStoreId());
+                if (store != null) {
+                    dto.setStoreName(store.getName());
+                }
+            } else {
             storeRepo.findById(check.getStoreId()).ifPresent(store -> {
                 dto.setStoreName(store.getName());
             });
+            }
         }
 
         // Map ảnh

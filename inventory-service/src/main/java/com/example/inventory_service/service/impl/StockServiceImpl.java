@@ -12,9 +12,12 @@ import com.example.inventory_service.repository.ShopImportDetailRepository;
 import com.example.inventory_service.repository.ShopStockRepository;
 import com.example.inventory_service.repository.ShopStoreRepository;
 import com.example.inventory_service.service.StockService;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 public class StockServiceImpl implements StockService {
@@ -41,9 +44,34 @@ public class StockServiceImpl implements StockService {
 
     @Override
     public List<StockByStoreDto> getAllStockByStore() {
-        List<ShopStock> stocks = stockRepo.findAll();
-        List<StockByStoreDto> result = new ArrayList<>();
+        // Dùng pagination với limit để tránh load toàn bộ
+        org.springframework.data.domain.Page<ShopStock> stockPage = stockRepo.findAll(
+                org.springframework.data.domain.PageRequest.of(0, 1000)); // Limit to 1000 records
         
+        return convertStocksToDto(stockPage.getContent());
+    }
+
+    @Override
+    public org.springframework.data.domain.Page<StockByStoreDto> getAllStockByStore(org.springframework.data.domain.Pageable pageable) {
+        org.springframework.data.domain.Page<ShopStock> stockPage = stockRepo.findAll(pageable);
+        List<StockByStoreDto> content = convertStocksToDto(stockPage.getContent());
+        return new PageImpl<>(content, pageable, stockPage.getTotalElements());
+    }
+
+    private List<StockByStoreDto> convertStocksToDto(List<ShopStock> stocks) {
+        // Batch fetch stores để tránh N+1 query
+        List<Long> storeIds = stocks.stream()
+                .map(ShopStock::getStoreId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<Long, com.example.inventory_service.entity.ShopStore> storeMap = new HashMap<>();
+        if (!storeIds.isEmpty()) {
+            storeMap.putAll(storeRepo.findAllById(storeIds).stream()
+                    .collect(Collectors.toMap(com.example.inventory_service.entity.ShopStore::getId, Function.identity())));
+        }
+        
+        List<StockByStoreDto> result = new ArrayList<>();
         for (ShopStock stock : stocks) {
             StockByStoreDto dto = new StockByStoreDto();
             dto.setProductId(stock.getProductId());
@@ -52,11 +80,12 @@ public class StockServiceImpl implements StockService {
             dto.setMinStock(stock.getMinStock());
             dto.setMaxStock(stock.getMaxStock());
             
-            // Lấy thông tin kho
-            storeRepo.findById(stock.getStoreId()).ifPresent(store -> {
+            // Lấy thông tin kho từ map
+            com.example.inventory_service.entity.ShopStore store = storeMap.get(stock.getStoreId());
+            if (store != null) {
                 dto.setStoreName(store.getName());
                 dto.setStoreCode(store.getCode());
-            });
+            }
             
             result.add(dto);
         }
@@ -67,8 +96,20 @@ public class StockServiceImpl implements StockService {
     @Override
     public List<StockByStoreDto> getStockByProductId(Long productId) {
         List<ShopStock> stocks = stockRepo.findByProductId(productId);
-        List<StockByStoreDto> result = new ArrayList<>();
         
+        // Batch fetch stores để tránh N+1 query
+        List<Long> storeIds = stocks.stream()
+                .map(ShopStock::getStoreId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<Long, com.example.inventory_service.entity.ShopStore> storeMap = new HashMap<>();
+        if (!storeIds.isEmpty()) {
+            storeMap.putAll(storeRepo.findAllById(storeIds).stream()
+                    .collect(Collectors.toMap(com.example.inventory_service.entity.ShopStore::getId, Function.identity())));
+        }
+        
+        List<StockByStoreDto> result = new ArrayList<>();
         for (ShopStock stock : stocks) {
             StockByStoreDto dto = new StockByStoreDto();
             dto.setProductId(stock.getProductId());
@@ -77,11 +118,12 @@ public class StockServiceImpl implements StockService {
             dto.setMinStock(stock.getMinStock());
             dto.setMaxStock(stock.getMaxStock());
             
-            // Lấy thông tin kho
-            storeRepo.findById(stock.getStoreId()).ifPresent(store -> {
+            // Lấy thông tin kho từ map
+            com.example.inventory_service.entity.ShopStore store = storeMap.get(stock.getStoreId());
+            if (store != null) {
                 dto.setStoreName(store.getName());
                 dto.setStoreCode(store.getCode());
-            });
+            }
             
             result.add(dto);
         }
@@ -122,8 +164,14 @@ public class StockServiceImpl implements StockService {
     @Override
     public List<StockByStoreDto> getStockByStoreId(Long storeId) {
         List<ShopStock> stocks = stockRepo.findByStoreId(storeId);
-        List<StockByStoreDto> result = new ArrayList<>();
         
+        // Batch fetch store (chỉ 1 store nhưng vẫn dùng batch để nhất quán)
+        Map<Long, com.example.inventory_service.entity.ShopStore> storeMap = new HashMap<>();
+        storeRepo.findById(storeId).ifPresent(store -> {
+            storeMap.put(store.getId(), store);
+        });
+        
+        List<StockByStoreDto> result = new ArrayList<>();
         for (ShopStock stock : stocks) {
             StockByStoreDto dto = new StockByStoreDto();
             dto.setProductId(stock.getProductId());
@@ -132,11 +180,12 @@ public class StockServiceImpl implements StockService {
             dto.setMinStock(stock.getMinStock());
             dto.setMaxStock(stock.getMaxStock());
             
-            // Lấy thông tin kho
-            storeRepo.findById(stock.getStoreId()).ifPresent(store -> {
+            // Lấy thông tin kho từ map
+            com.example.inventory_service.entity.ShopStore store = storeMap.get(stock.getStoreId());
+            if (store != null) {
                 dto.setStoreName(store.getName());
                 dto.setStoreCode(store.getCode());
-            });
+            }
             
             result.add(dto);
         }

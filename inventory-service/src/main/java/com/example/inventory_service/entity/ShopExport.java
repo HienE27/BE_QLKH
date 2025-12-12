@@ -5,10 +5,14 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.util.Date;
+import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "shop_exports")
+@Table(name = "shop_exports", indexes = {
+    @Index(name = "idx_export_type_status_date", columnList = "export_type,status,exports_date"),
+    @Index(name = "idx_export_code", columnList = "export_code"),
+    @Index(name = "idx_exports_date", columnList = "exports_date")
+})
 @NoArgsConstructor
 @AllArgsConstructor
 @Data
@@ -25,8 +29,9 @@ public class ShopExport {
     /**
      * Luôn = 'ORDER' (xuất cho khách hàng)
      */
+    @Enumerated(EnumType.STRING)
     @Column(name = "export_type", nullable = false)
-    private String exportType = "ORDER";
+    private ExportType exportType = ExportType.ORDER;
 
     @Column(name = "note", columnDefinition = "TEXT")
     private String note;
@@ -37,11 +42,12 @@ public class ShopExport {
     /**
      * PENDING / APPROVED / REJECTED / EXPORTED / RETURNED...
      */
+    @Enumerated(EnumType.STRING)
     @Column(name = "status")
-    private String status;
+    private ExportStatus status;
 
     @Column(name = "exports_date")
-    private Date exportsDate;
+    private LocalDateTime exportsDate;
 
     @Column(name = "stores_id")
     private Long storeId;
@@ -81,10 +87,10 @@ public class ShopExport {
     private String attachmentImage; // /uploads/...
 
     @Column(name = "created_at")
-    private Date createdAt;
+    private LocalDateTime createdAt;
 
     @Column(name = "updated_at")
-    private Date updatedAt;
+    private LocalDateTime updatedAt;
 
     // Audit fields
     @Column(name = "created_by")
@@ -94,17 +100,17 @@ public class ShopExport {
     private Long approvedBy; // userId của người duyệt
 
     @Column(name = "approved_at")
-    private Date approvedAt;
+    private LocalDateTime approvedAt;
 
     @Column(name = "rejected_by")
     private Long rejectedBy; // userId của người từ chối
 
     @Column(name = "rejected_at")
-    private Date rejectedAt;
+    private LocalDateTime rejectedAt;
 
     @Column(name = "exported_by")
     private Long exportedBy; // userId của người xuất kho
 
     @Column(name = "exported_at")
-    private Date exportedAt;
+    private LocalDateTime exportedAt;
 }

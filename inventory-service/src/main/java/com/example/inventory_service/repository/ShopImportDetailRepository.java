@@ -13,6 +13,19 @@ public interface ShopImportDetailRepository extends JpaRepository<ShopImportDeta
 
     List<ShopImportDetail> findByImportId(Long importId);
 
+    // Batch fetch để tránh N+1 query problem
+    List<ShopImportDetail> findByImportIdIn(List<Long> importIds);
+
+    // Calculate totals for multiple imports in a single query
+    @Query("""
+            SELECT d.importId,
+                   SUM(d.unitPrice * d.quantity * (1 - COALESCE(d.discountPercent, 0) / 100))
+            FROM ShopImportDetail d
+            WHERE d.importId IN :importIds
+            GROUP BY d.importId
+            """)
+    List<Object[]> sumTotalsByImportIds(@Param("importIds") List<Long> importIds);
+
     // dùng cho tính tồn kho
     List<ShopImportDetail> findByProductId(Long productId);
 

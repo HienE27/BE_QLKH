@@ -11,6 +11,8 @@ public interface StoreService {
 
     List<StoreDto> getAll();
 
+    Page<StoreDto> getAll(Pageable pageable);
+
     StoreDto getById(Long id);
 
     StoreDto create(StoreRequest req);

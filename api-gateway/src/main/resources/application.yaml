@@ -78,6 +78,12 @@ spring:
       # CORS + header dedupe
       default-filters:
         - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_UNIQUE
+      
+      # Enable compression for responses (Spring Cloud Gateway compression)
+      # Note: Compression may not work well with chunked responses
+      # Better to enable compression at service level (inventory-service)
+      httpclient:
+        compression: true
 
       globalcors:
         add-to-simple-url-handler-mapping: true

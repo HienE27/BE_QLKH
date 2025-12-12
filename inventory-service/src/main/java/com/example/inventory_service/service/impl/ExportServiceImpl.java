@@ -4,6 +4,8 @@ import com.example.inventory_service.dto.ExportDetailDto;
 import com.example.inventory_service.dto.ExportDetailRequest;
 import com.example.inventory_service.dto.SupplierExportDto;
 import com.example.inventory_service.dto.SupplierExportRequest;
+import com.example.inventory_service.entity.ExportStatus;
+import com.example.inventory_service.entity.ExportType;
 import com.example.inventory_service.entity.ShopExport;
 import com.example.inventory_service.entity.ShopExportDetail;
 import com.example.inventory_service.exception.NotFoundException;
@@ -12,23 +14,32 @@ import com.example.inventory_service.repository.ShopExportDetailRepository;
 import com.example.inventory_service.repository.ShopExportRepository;
 import com.example.inventory_service.repository.ShopStockRepository;
 import com.example.inventory_service.service.ExportService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.sql.Date;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
 public class ExportServiceImpl implements ExportService {
+
+    private static final Logger logger = LoggerFactory.getLogger(ExportServiceImpl.class);
 
     private final ShopExportRepository exportRepo;
     private final ShopExportDetailRepository detailRepo;
@@ -70,11 +81,11 @@ public class ExportServiceImpl implements ExportService {
             throw new IllegalArgumentException("Phiếu xuất kho bắt buộc phải có thông tin khách hàng");
         }
 
-        java.util.Date now = new java.util.Date();
+        LocalDateTime now = LocalDateTime.now();
 
         ShopExport export = new ShopExport();
         export.setCode(req.getCode() != null ? req.getCode() : "PXNCC" + System.currentTimeMillis());
-        export.setExportType("ORDER"); // Cố định = ORDER
+        export.setExportType(ExportType.ORDER); // Cố định = ORDER
         export.setStoreId(storeId);
 
         export.setNote(req.getNote());
@@ -84,7 +95,7 @@ public class ExportServiceImpl implements ExportService {
         export.setCustomerName(req.getCustomerName());
         export.setCustomerPhone(req.getCustomerPhone());
         export.setCustomerAddress(req.getCustomerAddress());
-        export.setStatus("PENDING");
+        export.setStatus(ExportStatus.PENDING);
         export.setExportsDate(now);
         export.setUserId(null);
         export.setOrderId(req.getOrderId());
@@ -161,101 +172,198 @@ public class ExportServiceImpl implements ExportService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<SupplierExportDto> search(String status, String code, LocalDate from, LocalDate to) {
-        Date fromDate = from != null ? Date.valueOf(from) : null;
-        Date toDate = to != null ? Date.valueOf(to.plusDays(1)) : null;
+    public Page<SupplierExportDto> search(ExportStatus status, String code, LocalDate from, LocalDate to, Pageable pageable) {
+        long startTime = System.currentTimeMillis();
+        LocalDateTime fromDate = from != null ? from.atStartOfDay() : null;
+        LocalDateTime toDate = to != null ? to.plusDays(1).atStartOfDay() : null;
 
-        // Sử dụng phương thức search gộp tất cả loại
-        List<ShopExport> list = exportRepo.searchAllExports(
+        Page<ShopExport> exportPage = exportRepo.searchAllExportsPaged(
                 status,
                 code,
                 fromDate,
-                toDate);
+                toDate,
+                pageable
+        );
 
-        List<SupplierExportDto> result = new ArrayList<>();
-        for (ShopExport e : list) {
-            result.add(toDtoWithCalcTotal(e));
+        logger.debug("Search exports query took {}ms, found {} records", 
+                System.currentTimeMillis() - startTime, exportPage.getTotalElements());
+
+        List<Long> exportIds = exportPage.getContent().stream()
+                .map(ShopExport::getId)
+                .filter(Objects::nonNull)
+                .toList();
+
+        Map<Long, BigDecimal> totalsMap = new HashMap<>();
+        Map<Long, List<ShopExportDetail>> detailsMap = new HashMap<>();
+        Map<Long, com.example.inventory_service.entity.ShopStore> storeMap = new HashMap<>();
+
+        if (!exportIds.isEmpty()) {
+            detailRepo.sumTotalsByExportIds(exportIds).forEach(row -> {
+                Long id = (Long) row[0];
+                BigDecimal total = (BigDecimal) row[1];
+                totalsMap.put(id, total);
+            });
+
+            List<ShopExportDetail> details = detailRepo.findByExportIdIn(exportIds);
+            detailsMap = details.stream().collect(Collectors.groupingBy(ShopExportDetail::getExportId));
+
+            List<Long> storeIds = details.stream()
+                    .map(ShopExportDetail::getStoreId)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .toList();
+            if (!storeIds.isEmpty()) {
+                storeMap.putAll(storeRepo.findAllById(storeIds).stream()
+                        .collect(Collectors.toMap(com.example.inventory_service.entity.ShopStore::getId, Function.identity())));
+            }
         }
-        return result;
+
+        final Map<Long, List<ShopExportDetail>> detailsMapFinal = detailsMap;
+        final Map<Long, com.example.inventory_service.entity.ShopStore> storeMapFinal = storeMap;
+        List<SupplierExportDto> dtoPage = exportPage.getContent().stream()
+                .map(e -> toDtoWithCalcTotal(
+                        e,
+                        detailsMapFinal.getOrDefault(e.getId(), List.of()),
+                        totalsMap.get(e.getId()),
+                        storeMapFinal))
+                .toList();
+
+        logger.debug("Total processing time: {}ms", System.currentTimeMillis() - startTime);
+        return new PageImpl<>(dtoPage, pageable, exportPage.getTotalElements());
     }
 
     @Override
     @Transactional(readOnly = true)
-    public Page<SupplierExportDto> searchPaged(String status,
+    public Page<SupplierExportDto> searchPaged(ExportStatus status,
                                                String code,
                                                LocalDate from,
                                                LocalDate to,
                                                String sortField,
                                                String sortDir,
                                                Pageable pageable) {
-        Date fromDate = from != null ? Date.valueOf(from) : null;
-        Date toDate = to != null ? Date.valueOf(to.plusDays(1)) : null;
+        long startTime = System.currentTimeMillis();
+        LocalDateTime fromDate = from != null ? from.atStartOfDay() : null;
+        LocalDateTime toDate = to != null ? to.plusDays(1).atStartOfDay() : null;
 
-        // Lấy toàn bộ danh sách đã lọc theo status, code, ngày
-        List<ShopExport> exports = exportRepo.searchAllExports(
+        Page<ShopExport> exportPage = exportRepo.searchAllExportsPaged(
                 status,
                 code,
                 fromDate,
-                toDate
+                toDate,
+                pageable
         );
 
-        // Sort theo ngày hoặc giá trị
-        Comparator<ShopExport> comparator;
-        if ("value".equalsIgnoreCase(sortField)) {
-            // Tính totalValue từ details để sort
-            comparator = Comparator.comparing(
-                    (ShopExport e) -> {
-                        List<ShopExportDetail> details = detailRepo.findByExportId(e.getId());
-                        BigDecimal total = BigDecimal.ZERO;
-                        if (details != null) {
-                            for (ShopExportDetail d : details) {
-                                if (d.getUnitPrice() == null || d.getQuantity() == null) continue;
-                                BigDecimal line = d.getUnitPrice().multiply(BigDecimal.valueOf(d.getQuantity()));
-                                if (d.getDiscountPercent() != null && d.getDiscountPercent().compareTo(BigDecimal.ZERO) > 0) {
-                                    BigDecimal discountMultiplier = BigDecimal.ONE
-                                            .subtract(d.getDiscountPercent().divide(BigDecimal.valueOf(100), 4,
-                                                    java.math.RoundingMode.HALF_UP));
-                                    line = line.multiply(discountMultiplier);
-                                }
-                                total = total.add(line);
-                            }
-                        }
-                        return total;
-                    },
-                    Comparator.nullsFirst(BigDecimal::compareTo)
-            );
-        } else {
-            // Mặc định sort theo ngày xuất
-            comparator = Comparator.comparing(
-                    (ShopExport e) -> e.getExportsDate() != null ? e.getExportsDate().getTime() : 0L,
-                    Comparator.nullsFirst(Long::compareTo)
-            );
-        }
-        if ("desc".equalsIgnoreCase(sortDir)) {
-            comparator = comparator.reversed();
+        List<Long> exportIds = exportPage.getContent().stream()
+                .map(ShopExport::getId)
+                .filter(Objects::nonNull)
+                .toList();
+
+        Map<Long, BigDecimal> totalsMap = new HashMap<>();
+        Map<Long, List<ShopExportDetail>> detailsMap = new HashMap<>();
+        Map<Long, com.example.inventory_service.entity.ShopStore> storeMap = new HashMap<>();
+
+        if (!exportIds.isEmpty()) {
+            detailRepo.sumTotalsByExportIds(exportIds).forEach(row -> {
+                Long id = (Long) row[0];
+                BigDecimal total = (BigDecimal) row[1];
+                totalsMap.put(id, total);
+            });
+
+            List<ShopExportDetail> details = detailRepo.findByExportIdIn(exportIds);
+            detailsMap = details.stream().collect(Collectors.groupingBy(ShopExportDetail::getExportId));
+
+            List<Long> storeIds = details.stream()
+                    .map(ShopExportDetail::getStoreId)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .toList();
+            if (!storeIds.isEmpty()) {
+                storeMap.putAll(storeRepo.findAllById(storeIds).stream()
+                        .collect(Collectors.toMap(com.example.inventory_service.entity.ShopStore::getId, Function.identity())));
+            }
         }
 
-        List<ShopExport> sorted = exports.stream()
-                .sorted(comparator)
-                .collect(Collectors.toList());
+        final Map<Long, List<ShopExportDetail>> detailsMapFinal = detailsMap;
+        final Map<Long, com.example.inventory_service.entity.ShopStore> storeMapFinal = storeMap;
+        List<SupplierExportDto> dtoPage = exportPage.getContent().stream()
+                .map(e -> toDtoWithCalcTotal(
+                        e,
+                        detailsMapFinal.getOrDefault(e.getId(), List.of()),
+                        totalsMap.get(e.getId()),
+                        storeMapFinal))
+                .toList();
 
-        int pageSize = pageable.getPageSize();
-        int currentPage = pageable.getPageNumber();
-        int startItem = currentPage * pageSize;
+        logger.debug("Search paged query took {}ms, processed {} records", 
+                System.currentTimeMillis() - startTime, exportPage.getTotalElements());
+        return new PageImpl<>(dtoPage, pageable, exportPage.getTotalElements());
+    }
 
-        List<ShopExport> pageContent;
-        if (startItem >= sorted.size()) {
-            pageContent = List.of();
-        } else {
-            int toIndex = Math.min(startItem + pageSize, sorted.size());
-            pageContent = sorted.subList(startItem, toIndex);
+    @Override
+    @Transactional(readOnly = true)
+    public Page<SupplierExportDto> searchKeyset(ExportStatus status,
+                                                String code,
+                                                LocalDate from,
+                                                LocalDate to,
+                                                LocalDateTime lastDate,
+                                                Long lastId,
+                                                Pageable pageable) {
+        long startTime = System.currentTimeMillis();
+        LocalDateTime fromDate = from != null ? from.atStartOfDay() : null;
+        LocalDateTime toDate = to != null ? to.plusDays(1).atStartOfDay() : null;
+
+        Page<ShopExport> exportPage = exportRepo.searchAllExportsKeyset(
+                status,
+                code,
+                fromDate,
+                toDate,
+                lastDate,
+                lastId,
+                pageable
+        );
+
+        List<Long> exportIds = exportPage.getContent().stream()
+                .map(ShopExport::getId)
+                .filter(Objects::nonNull)
+                .toList();
+
+        Map<Long, BigDecimal> totalsMap = new HashMap<>();
+        Map<Long, List<ShopExportDetail>> detailsMap = new HashMap<>();
+        Map<Long, com.example.inventory_service.entity.ShopStore> storeMap = new HashMap<>();
+
+        if (!exportIds.isEmpty()) {
+            detailRepo.sumTotalsByExportIds(exportIds).forEach(row -> {
+                Long id = (Long) row[0];
+                BigDecimal total = (BigDecimal) row[1];
+                totalsMap.put(id, total);
+            });
+
+            List<ShopExportDetail> details = detailRepo.findByExportIdIn(exportIds);
+            detailsMap = details.stream().collect(Collectors.groupingBy(ShopExportDetail::getExportId));
+
+            List<Long> storeIds = details.stream()
+                    .map(ShopExportDetail::getStoreId)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .toList();
+            if (!storeIds.isEmpty()) {
+                storeMap.putAll(storeRepo.findAllById(storeIds).stream()
+                        .collect(Collectors.toMap(com.example.inventory_service.entity.ShopStore::getId, Function.identity())));
+            }
         }
 
-        List<SupplierExportDto> dtoPage = pageContent.stream()
-                .map(this::toDtoWithCalcTotal)
-                .collect(Collectors.toList());
+        final Map<Long, List<ShopExportDetail>> detailsMapFinal = detailsMap;
+        final Map<Long, com.example.inventory_service.entity.ShopStore> storeMapFinal = storeMap;
+        List<SupplierExportDto> dtoPage = exportPage.getContent().stream()
+                .map(e -> toDtoWithCalcTotal(
+                        e,
+                        detailsMapFinal.getOrDefault(e.getId(), List.of()),
+                        totalsMap.get(e.getId()),
+                        storeMapFinal))
+                .toList();
 
-        return new PageImpl<>(dtoPage, pageable, sorted.size());
+        logger.debug("Keyset pagination query took {}ms, processed {} records", 
+                System.currentTimeMillis() - startTime, exportPage.getTotalElements());
+        return new PageImpl<>(dtoPage, pageable, exportPage.getTotalElements());
     }
 
     @Override
@@ -281,7 +389,7 @@ public class ExportServiceImpl implements ExportService {
         ShopExport export = exportRepo.findById(id)
                 .orElseThrow(() -> new NotFoundException("Export not found: " + id));
 
-        export.setExportType("ORDER"); // Cố định = ORDER
+        export.setExportType(ExportType.ORDER); // Cố định = ORDER
 
         if (req.getCode() != null && !req.getCode().isBlank()) {
             export.setCode(req.getCode());
@@ -295,7 +403,7 @@ public class ExportServiceImpl implements ExportService {
         export.setOrderId(req.getOrderId());
         export.setNote(req.getNote());
         export.setDescription(req.getDescription());
-        export.setUpdatedAt(new java.util.Date());
+        export.setUpdatedAt(LocalDateTime.now());
 
         // Cập nhật ảnh
         if (req.getAttachmentImages() != null && !req.getAttachmentImages().isEmpty()) {
@@ -366,17 +474,17 @@ public class ExportServiceImpl implements ExportService {
         ShopExport export = exportRepo.findById(id)
                 .orElseThrow(() -> new NotFoundException("Export not found: " + id));
 
-        if (!"PENDING".equals(export.getStatus())) {
+        if (export.getStatus() != ExportStatus.PENDING) {
             throw new IllegalStateException("Chỉ có thể duyệt phiếu đang ở trạng thái PENDING");
         }
 
-        export.setStatus("APPROVED");
+        export.setStatus(ExportStatus.APPROVED);
         Long currentUserId = getCurrentUserId();
         if (currentUserId != null) {
             export.setApprovedBy(currentUserId);
-            export.setApprovedAt(new java.util.Date());
+            export.setApprovedAt(LocalDateTime.now());
         }
-        export.setUpdatedAt(new java.util.Date());
+        export.setUpdatedAt(LocalDateTime.now());
         export = exportRepo.save(export);
 
         return toDtoWithCalcTotal(export);
@@ -388,7 +496,7 @@ public class ExportServiceImpl implements ExportService {
         ShopExport export = exportRepo.findById(id)
                 .orElseThrow(() -> new NotFoundException("Export not found: " + id));
 
-        if (!"APPROVED".equals(export.getStatus())) {
+        if (export.getStatus() != ExportStatus.APPROVED) {
             throw new IllegalStateException("Chỉ có thể xuất kho khi phiếu đã được duyệt (APPROVED)");
         }
 
@@ -424,13 +532,13 @@ public class ExportServiceImpl implements ExportService {
         }
 
         // Cập nhật trạng thái
-        export.setStatus("EXPORTED");
+        export.setStatus(ExportStatus.EXPORTED);
         Long currentUserId = getCurrentUserId();
         if (currentUserId != null) {
             export.setExportedBy(currentUserId);
-            export.setExportedAt(new java.util.Date());
+            export.setExportedAt(LocalDateTime.now());
         }
-        export.setUpdatedAt(new java.util.Date());
+        export.setUpdatedAt(LocalDateTime.now());
         export = exportRepo.save(export);
 
         // Trừ tồn kho từ shop_stocks (mỗi dòng trừ tại kho riêng)
@@ -456,12 +564,12 @@ public class ExportServiceImpl implements ExportService {
         ShopExport export = exportRepo.findById(id)
                 .orElseThrow(() -> new NotFoundException("Export not found: " + id));
 
-        if (!"PENDING".equals(export.getStatus())) {
+        if (export.getStatus() != ExportStatus.PENDING) {
             throw new IllegalStateException("Chỉ có thể hủy phiếu đang ở trạng thái PENDING");
         }
 
-        export.setStatus("CANCELLED");
-        export.setUpdatedAt(new java.util.Date());
+        export.setStatus(ExportStatus.CANCELLED);
+        export.setUpdatedAt(LocalDateTime.now());
         export = exportRepo.save(export);
 
         return toDtoWithCalcTotal(export);
@@ -473,17 +581,17 @@ public class ExportServiceImpl implements ExportService {
         ShopExport export = exportRepo.findById(id)
                 .orElseThrow(() -> new NotFoundException("Export not found: " + id));
 
-        if (!"PENDING".equals(export.getStatus())) {
+        if (export.getStatus() != ExportStatus.PENDING) {
             throw new IllegalStateException("Chỉ có thể từ chối phiếu đang ở trạng thái PENDING");
         }
 
-        export.setStatus("REJECTED");
+        export.setStatus(ExportStatus.REJECTED);
         Long currentUserId = getCurrentUserId();
         if (currentUserId != null) {
             export.setRejectedBy(currentUserId);
-            export.setRejectedAt(new java.util.Date());
+            export.setRejectedAt(LocalDateTime.now());
         }
-        export.setUpdatedAt(new java.util.Date());
+        export.setUpdatedAt(LocalDateTime.now());
         export = exportRepo.save(export);
 
         return toDtoWithCalcTotal(export);
@@ -491,26 +599,143 @@ public class ExportServiceImpl implements ExportService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<SupplierExportDto> getAll() {
-        return exportRepo.findAll().stream()
-                .map(this::toDtoWithCalcTotal)
+    public Page<SupplierExportDto> getAll(Pageable pageable) {
+        Page<ShopExport> exportPage = exportRepo.findAll(pageable);
+        List<Long> exportIds = exportPage.getContent().stream()
+                .map(ShopExport::getId)
+                .filter(Objects::nonNull)
                 .toList();
+
+        Map<Long, BigDecimal> totalsMap = new HashMap<>();
+        Map<Long, List<ShopExportDetail>> detailsMap = new HashMap<>();
+        Map<Long, com.example.inventory_service.entity.ShopStore> storeMap = new HashMap<>();
+
+        if (!exportIds.isEmpty()) {
+            detailRepo.sumTotalsByExportIds(exportIds).forEach(row -> {
+                Long id = (Long) row[0];
+                BigDecimal total = (BigDecimal) row[1];
+                totalsMap.put(id, total);
+            });
+
+            List<ShopExportDetail> details = detailRepo.findByExportIdIn(exportIds);
+            detailsMap = details.stream().collect(Collectors.groupingBy(ShopExportDetail::getExportId));
+
+            List<Long> storeIds = details.stream()
+                    .map(ShopExportDetail::getStoreId)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .toList();
+            if (!storeIds.isEmpty()) {
+                storeMap.putAll(storeRepo.findAllById(storeIds).stream()
+                        .collect(Collectors.toMap(com.example.inventory_service.entity.ShopStore::getId, Function.identity())));
+            }
+        }
+
+        final Map<Long, List<ShopExportDetail>> detailsMapFinal = detailsMap;
+        final Map<Long, com.example.inventory_service.entity.ShopStore> storeMapFinal = storeMap;
+        List<SupplierExportDto> dtoPage = exportPage.getContent().stream()
+                .map(e -> toDtoWithCalcTotal(
+                        e,
+                        detailsMapFinal.getOrDefault(e.getId(), List.of()),
+                        totalsMap.get(e.getId()),
+                        storeMapFinal))
+                .toList();
+
+        return new PageImpl<>(dtoPage, pageable, exportPage.getTotalElements());
     }
 
     @Override
     @Transactional(readOnly = true)
-    public List<SupplierExportDto> getByStore(Long storeId) {
-        return exportRepo.findByStoreId(storeId).stream()
-                .map(this::toDtoWithCalcTotal)
+    public Page<SupplierExportDto> getByStore(Long storeId, Pageable pageable) {
+        Page<ShopExport> exportPage = exportRepo.findByStoreId(storeId, pageable);
+        List<Long> exportIds = exportPage.getContent().stream()
+                .map(ShopExport::getId)
+                .filter(Objects::nonNull)
                 .toList();
+
+        Map<Long, BigDecimal> totalsMap = new HashMap<>();
+        Map<Long, List<ShopExportDetail>> detailsMap = new HashMap<>();
+        Map<Long, com.example.inventory_service.entity.ShopStore> storeMap = new HashMap<>();
+
+        if (!exportIds.isEmpty()) {
+            detailRepo.sumTotalsByExportIds(exportIds).forEach(row -> {
+                Long id = (Long) row[0];
+                BigDecimal total = (BigDecimal) row[1];
+                totalsMap.put(id, total);
+            });
+
+            List<ShopExportDetail> details = detailRepo.findByExportIdIn(exportIds);
+            detailsMap = details.stream().collect(Collectors.groupingBy(ShopExportDetail::getExportId));
+
+            List<Long> storeIds = details.stream()
+                    .map(ShopExportDetail::getStoreId)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .toList();
+            if (!storeIds.isEmpty()) {
+                storeMap.putAll(storeRepo.findAllById(storeIds).stream()
+                        .collect(Collectors.toMap(com.example.inventory_service.entity.ShopStore::getId, Function.identity())));
+            }
+        }
+
+        final Map<Long, List<ShopExportDetail>> detailsMapFinal = detailsMap;
+        final Map<Long, com.example.inventory_service.entity.ShopStore> storeMapFinal = storeMap;
+        List<SupplierExportDto> dtoPage = exportPage.getContent().stream()
+                .map(e -> toDtoWithCalcTotal(
+                        e,
+                        detailsMapFinal.getOrDefault(e.getId(), List.of()),
+                        totalsMap.get(e.getId()),
+                        storeMapFinal))
+                .toList();
+
+        return new PageImpl<>(dtoPage, pageable, exportPage.getTotalElements());
     }
 
     @Override
     @Transactional(readOnly = true)
-    public List<SupplierExportDto> getByOrder(Long orderId) {
-        return exportRepo.findByOrderId(orderId).stream()
-                .map(this::toDtoWithCalcTotal)
+    public Page<SupplierExportDto> getByOrder(Long orderId, Pageable pageable) {
+        Page<ShopExport> exportPage = exportRepo.findByOrderId(orderId, pageable);
+        List<Long> exportIds = exportPage.getContent().stream()
+                .map(ShopExport::getId)
+                .filter(Objects::nonNull)
                 .toList();
+
+        Map<Long, BigDecimal> totalsMap = new HashMap<>();
+        Map<Long, List<ShopExportDetail>> detailsMap = new HashMap<>();
+        Map<Long, com.example.inventory_service.entity.ShopStore> storeMap = new HashMap<>();
+
+        if (!exportIds.isEmpty()) {
+            detailRepo.sumTotalsByExportIds(exportIds).forEach(row -> {
+                Long id = (Long) row[0];
+                BigDecimal total = (BigDecimal) row[1];
+                totalsMap.put(id, total);
+            });
+
+            List<ShopExportDetail> details = detailRepo.findByExportIdIn(exportIds);
+            detailsMap = details.stream().collect(Collectors.groupingBy(ShopExportDetail::getExportId));
+
+            List<Long> storeIds = details.stream()
+                    .map(ShopExportDetail::getStoreId)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .toList();
+            if (!storeIds.isEmpty()) {
+                storeMap.putAll(storeRepo.findAllById(storeIds).stream()
+                        .collect(Collectors.toMap(com.example.inventory_service.entity.ShopStore::getId, Function.identity())));
+            }
+        }
+
+        final Map<Long, List<ShopExportDetail>> detailsMapFinal = detailsMap;
+        final Map<Long, com.example.inventory_service.entity.ShopStore> storeMapFinal = storeMap;
+        List<SupplierExportDto> dtoPage = exportPage.getContent().stream()
+                .map(e -> toDtoWithCalcTotal(
+                        e,
+                        detailsMapFinal.getOrDefault(e.getId(), List.of()),
+                        totalsMap.get(e.getId()),
+                        storeMapFinal))
+                .toList();
+
+        return new PageImpl<>(dtoPage, pageable, exportPage.getTotalElements());
     }
 
     // ========= HELPER METHODS ========= //
@@ -584,20 +809,39 @@ public class ExportServiceImpl implements ExportService {
     }
 
     private SupplierExportDto toDtoWithCalcTotal(ShopExport e) {
-        BigDecimal total = BigDecimal.ZERO;
-        List<ExportDetailDto> itemDtos = new ArrayList<>();
-
         List<ShopExportDetail> details = detailRepo.findByExportId(e.getId());
+
+        Map<Long, com.example.inventory_service.entity.ShopStore> storeMap = Collections.emptyMap();
+        if (details != null && !details.isEmpty()) {
+            List<Long> storeIds = details.stream()
+                    .map(ShopExportDetail::getStoreId)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .toList();
+            if (!storeIds.isEmpty()) {
+                storeMap = storeRepo.findAllById(storeIds).stream()
+                        .collect(Collectors.toMap(com.example.inventory_service.entity.ShopStore::getId, Function.identity()));
+            }
+        }
+
+        return toDtoWithCalcTotal(e, details, null, storeMap);
+    }
+
+    private SupplierExportDto toDtoWithCalcTotal(
+            ShopExport e,
+            List<ShopExportDetail> details,
+            BigDecimal precomputedTotal,
+            Map<Long, com.example.inventory_service.entity.ShopStore> storeMap) {
+        BigDecimal total = precomputedTotal != null ? precomputedTotal : BigDecimal.ZERO;
+        List<ExportDetailDto> itemDtos = new ArrayList<>();
 
         if (details != null) {
             for (ShopExportDetail d : details) {
-                if (d.getUnitPrice() == null || d.getQuantity() == null)
-                    continue;
-
+                if (precomputedTotal == null) {
+                    if (d.getUnitPrice() != null && d.getQuantity() != null) {
                 BigDecimal line = d.getUnitPrice()
                         .multiply(BigDecimal.valueOf(d.getQuantity()));
 
-                // Áp dụng chiết khấu nếu có
                 if (d.getDiscountPercent() != null && d.getDiscountPercent().compareTo(BigDecimal.ZERO) > 0) {
                     BigDecimal discountMultiplier = BigDecimal.ONE
                             .subtract(d.getDiscountPercent().divide(BigDecimal.valueOf(100), 4,
@@ -606,6 +850,8 @@ public class ExportServiceImpl implements ExportService {
                 }
 
                 total = total.add(line);
+                    }
+                }
 
                 ExportDetailDto itemDto = new ExportDetailDto();
                 itemDto.setId(d.getId());
@@ -621,31 +867,38 @@ public class ExportServiceImpl implements ExportService {
                 itemDto.setStoreName(null);
                 itemDto.setStoreCode(null);
 
-                // Lấy thông tin kho nếu có
-                if (d.getStoreId() != null) {
-                    storeRepo.findById(d.getStoreId()).ifPresent(store -> {
+                if (d.getStoreId() != null && storeMap != null && !storeMap.isEmpty()) {
+                    com.example.inventory_service.entity.ShopStore store = storeMap.get(d.getStoreId());
+                    if (store != null) {
                         itemDto.setStoreName(store.getName());
                         itemDto.setStoreCode(store.getCode());
-                    });
+                    }
                 }
 
                 itemDtos.add(itemDto);
             }
         }
 
-        SupplierExportDto dto = toDto(e, total);
+        SupplierExportDto dto = toDto(e, total, storeMap);
         dto.setItems(itemDtos);
         return dto;
     }
 
     private SupplierExportDto toDto(ShopExport e, BigDecimal total) {
+        return toDto(e, total, null);
+    }
+
+    private SupplierExportDto toDto(ShopExport e, BigDecimal total, Map<Long, com.example.inventory_service.entity.ShopStore> storeMap) {
         SupplierExportDto dto = new SupplierExportDto();
         dto.setId(e.getId());
         dto.setCode(e.getCode());
         dto.setStoreId(e.getStoreId());
         dto.setCustomerId(e.getCustomerId());
-        dto.setStatus(e.getStatus());
-        dto.setExportsDate(e.getExportsDate());
+        dto.setStatus(e.getStatus() != null ? e.getStatus().name() : null);
+        // Convert LocalDateTime to Date for DTO compatibility
+        if (e.getExportsDate() != null) {
+            dto.setExportsDate(java.sql.Timestamp.valueOf(e.getExportsDate()));
+        }
         dto.setNote(e.getNote());
         dto.setTotalValue(total);
 
@@ -659,11 +912,18 @@ public class ExportServiceImpl implements ExportService {
         // // Fetch from customer service
         // }
 
-        // Lấy thông tin kho
+        // Lấy thông tin kho từ map nếu có, hoặc query từ DB
         if (e.getStoreId() != null) {
+            if (storeMap != null && !storeMap.isEmpty()) {
+                com.example.inventory_service.entity.ShopStore store = storeMap.get(e.getStoreId());
+                if (store != null) {
+                    dto.setStoreName(store.getName());
+                }
+            } else {
             storeRepo.findById(e.getStoreId()).ifPresent(store -> {
                 dto.setStoreName(store.getName());
             });
+            }
         }
 
         // Map ảnh
@@ -679,13 +939,21 @@ public class ExportServiceImpl implements ExportService {
 
         // Map audit fields với userId và timestamp
         dto.setCreatedBy(e.getCreatedBy());
-        dto.setCreatedAt(e.getCreatedAt());
+        if (e.getCreatedAt() != null) {
+            dto.setCreatedAt(java.sql.Timestamp.valueOf(e.getCreatedAt()));
+        }
         dto.setApprovedBy(e.getApprovedBy());
-        dto.setApprovedAt(e.getApprovedAt());
+        if (e.getApprovedAt() != null) {
+            dto.setApprovedAt(java.sql.Timestamp.valueOf(e.getApprovedAt()));
+        }
         dto.setRejectedBy(e.getRejectedBy());
-        dto.setRejectedAt(e.getRejectedAt());
+        if (e.getRejectedAt() != null) {
+            dto.setRejectedAt(java.sql.Timestamp.valueOf(e.getRejectedAt()));
+        }
         dto.setExportedBy(e.getExportedBy());
-        dto.setExportedAt(e.getExportedAt());
+        if (e.getExportedAt() != null) {
+            dto.setExportedAt(java.sql.Timestamp.valueOf(e.getExportedAt()));
+        }
         
         // Lấy tên user và role từ userId
         try {

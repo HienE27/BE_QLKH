@@ -12,6 +12,9 @@ public interface StockService {
     // Tồn kho tất cả sản phẩm tại tất cả các kho
     List<StockByStoreDto> getAllStockByStore();
 
+    // Tồn kho tất cả sản phẩm tại tất cả các kho (với pagination)
+    org.springframework.data.domain.Page<StockByStoreDto> getAllStockByStore(org.springframework.data.domain.Pageable pageable);
+
     // Tồn kho của 1 sản phẩm tại tất cả các kho
     List<StockByStoreDto> getStockByProductId(Long productId);
 

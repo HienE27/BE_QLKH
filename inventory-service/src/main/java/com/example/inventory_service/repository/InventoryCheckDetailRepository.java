@@ -9,5 +9,8 @@ public interface InventoryCheckDetailRepository extends JpaRepository<InventoryC
 
     List<InventoryCheckDetail> findByInventoryCheckId(Long inventoryCheckId);
 
+    // Batch fetch để tránh N+1 query problem
+    List<InventoryCheckDetail> findByInventoryCheckIdIn(List<Long> inventoryCheckIds);
+
     void deleteByInventoryCheckId(Long inventoryCheckId);
 }

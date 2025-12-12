@@ -13,6 +13,17 @@ public interface ShopExportDetailRepository extends JpaRepository<ShopExportDeta
 
     List<ShopExportDetail> findByExportId(Long exportId);
 
+    List<ShopExportDetail> findByExportIdIn(List<Long> exportIds);
+
+    @Query("""
+            SELECT d.exportId,
+                   SUM(d.unitPrice * d.quantity * (1 - COALESCE(d.discountPercent, 0) / 100))
+            FROM ShopExportDetail d
+            WHERE d.exportId IN :exportIds
+            GROUP BY d.exportId
+            """)
+    List<Object[]> sumTotalsByExportIds(@Param("exportIds") List<Long> exportIds);
+
     // dùng cho tính tồn kho
     List<ShopExportDetail> findByProductId(Long productId);
 

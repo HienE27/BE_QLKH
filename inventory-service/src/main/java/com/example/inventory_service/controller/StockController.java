@@ -4,6 +4,9 @@ import com.example.inventory_service.common.ApiResponse;
 import com.example.inventory_service.dto.StockByStoreDto;
 import com.example.inventory_service.dto.CreateStockRequest;
 import com.example.inventory_service.service.StockService;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -19,9 +22,23 @@ public class StockController {
     }
 
     // 1) Tổng tồn kho tất cả sản phẩm (từ shop_stocks)
+    /**
+     * @deprecated Use paginated version {@link #getAllStockPaged(int, int)} instead.
+     * This endpoint returns a limited list (max 1000 records) and may not return all results.
+     */
+    @Deprecated
     @GetMapping
     public ApiResponse<List<StockByStoreDto>> getAllStock() {
         return ApiResponse.ok(stockService.getAllStockByStore());
+    }
+
+    @GetMapping("/paged")
+    public ApiResponse<Page<StockByStoreDto>> getAllStockPaged(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        Pageable pageable = PageRequest.of(page, size);
+        Page<StockByStoreDto> data = stockService.getAllStockByStore(pageable);
+        return ApiResponse.ok(data);
     }
 
     // 2) Tồn kho của 1 sản phẩm tại tất cả các kho (từ shop_stocks)

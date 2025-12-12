@@ -6,9 +6,16 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 @Entity
-@Table(name = "shop_stocks", uniqueConstraints = {
-    @UniqueConstraint(name = "uk_stock_product_store", columnNames = {"products_id", "stores_id"})
-})
+@Table(name = "shop_stocks", 
+    uniqueConstraints = {
+        @UniqueConstraint(name = "uk_stock_product_store", columnNames = {"products_id", "stores_id"})
+    },
+    indexes = {
+        @Index(name = "idx_stock_product_id", columnList = "products_id"),
+        @Index(name = "idx_stock_store_id", columnList = "stores_id"),
+        @Index(name = "idx_stock_product_store", columnList = "products_id, stores_id")
+    }
+)
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

@@ -25,9 +25,17 @@ public class StoreServiceImpl implements StoreService {
 
     @Override
     public List<StoreDto> getAll() {
-        return repo.findAll().stream()
+        // Dùng pagination với limit để tránh load toàn bộ (stores thường không nhiều)
+        Page<ShopStore> storePage = repo.findAll(
+                org.springframework.data.domain.PageRequest.of(0, 100)); // Limit to 100 stores
+        return storePage.getContent().stream()
                 .map(this::toDto)
                 .toList();
+    }
+
+    @Override
+    public Page<StoreDto> getAll(Pageable pageable) {
+        return repo.findAll(pageable).map(this::toDto);
     }
 
     @Override
