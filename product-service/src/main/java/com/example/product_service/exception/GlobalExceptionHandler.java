@@ -29,10 +29,21 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.fail(ex.getMessage()));
     }
 
+    @ExceptionHandler(org.springframework.dao.DataIntegrityViolationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleDataIntegrityViolation(
+            org.springframework.dao.DataIntegrityViolationException ex) {
+        log.error("Data integrity violation", ex);
+        String message = "Không thể xóa sản phẩm này vì đang được sử dụng trong phiếu nhập/xuất kho hoặc tồn kho. " +
+                "Vui lòng xóa các phiếu liên quan trước.";
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.fail(message));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleOther(Exception ex) {
-        log.error("Unhandled exception", ex);
+        log.error("Unhandled exception: {}", ex.getMessage(), ex);
+        String message = ex.getMessage() != null ? ex.getMessage() : "Internal server error";
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(ApiResponse.fail("Internal server error"));
+                .body(ApiResponse.fail(message));
     }
 }

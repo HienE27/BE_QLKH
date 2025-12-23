@@ -66,4 +66,11 @@ public class StockController {
     public ApiResponse<StockByStoreDto> createOrUpdateStock(@RequestBody CreateStockRequest request) {
         return ApiResponse.ok(stockService.createOrUpdateStock(request));
     }
+
+    // 6) Xóa tất cả tồn kho của 1 sản phẩm
+    @DeleteMapping("/product/{productId}")
+    public ApiResponse<Void> deleteByProductId(@PathVariable Long productId) {
+        stockService.deleteByProductId(productId);
+        return ApiResponse.ok("Deleted", null);
+    }
 }

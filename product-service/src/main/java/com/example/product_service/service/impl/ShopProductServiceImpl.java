@@ -29,15 +29,24 @@ public class ShopProductServiceImpl implements ShopProductService {
     private final ShopProductRepository repo;
     private final ShopCategoryRepository categoryRepo;
     private final com.example.product_service.repository.ProductSupplierRepository productSupplierRepo;
+    private final com.example.product_service.repository.ShopProductImageRepository imageRepo;
+    private final com.example.product_service.repository.ShopProductDiscountRepository discountRepo;
+    private final com.example.product_service.client.InventoryServiceClient inventoryClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    // ✅ Constructor duy nhất, tiêm cả 2 repo
+    // ✅ Constructor duy nhất, tiêm cả các repo
     public ShopProductServiceImpl(ShopProductRepository repo,
             ShopCategoryRepository categoryRepo,
-            com.example.product_service.repository.ProductSupplierRepository productSupplierRepo) {
+            com.example.product_service.repository.ProductSupplierRepository productSupplierRepo,
+            com.example.product_service.repository.ShopProductImageRepository imageRepo,
+            com.example.product_service.repository.ShopProductDiscountRepository discountRepo,
+            com.example.product_service.client.InventoryServiceClient inventoryClient) {
         this.repo = repo;
         this.categoryRepo = categoryRepo;
         this.productSupplierRepo = productSupplierRepo;
+        this.imageRepo = imageRepo;
+        this.discountRepo = discountRepo;
+        this.inventoryClient = inventoryClient;
     }
 
     @Override
@@ -96,13 +105,28 @@ public class ShopProductServiceImpl implements ShopProductService {
             throw new NotFoundException("Product not found: " + id);
         }
 
+        // Xóa các bản ghi liên quan trước
+        // 1. Xóa stock records trong inventory-service (quan trọng nhất, phải xóa
+        // trước)
         try {
-            repo.deleteById(id);
-        } catch (org.springframework.dao.DataIntegrityViolationException e) {
-            throw new IllegalStateException(
-                    "Không thể xóa sản phẩm này vì đang được sử dụng trong phiếu nhập/xuất kho hoặc tồn kho. " +
-                            "Vui lòng xóa các phiếu liên quan trước.");
+            inventoryClient.deleteStockByProductId(id);
+        } catch (Exception e) {
+            System.err.println("⚠️ Warning: Could not delete stock for product " + id + ": " + e.getMessage());
+            // Tiếp tục xóa các bản ghi khác
         }
+
+        // 2. Xóa ProductSupplier (junction table)
+        productSupplierRepo.deleteByProductId(id);
+
+        // 3. Xóa ShopProductImage
+        imageRepo.deleteByProductId(id);
+
+        // 4. Xóa ShopProductDiscount
+        discountRepo.deleteByProductId(id);
+
+        // 5. Cuối cùng mới xóa sản phẩm
+        // DataIntegrityViolationException sẽ được xử lý bởi GlobalExceptionHandler
+        repo.deleteById(id);
     }
 
     // ✅ search + phân trang

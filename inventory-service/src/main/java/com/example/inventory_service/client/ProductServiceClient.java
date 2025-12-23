@@ -70,6 +70,15 @@ public class ProductServiceClient {
     }
 
     /**
+     * Xóa tất cả tồn kho của sản phẩm (gọi từ inventory-service)
+     * Note: Method này không được sử dụng, vì stock được quản lý trong inventory-service
+     */
+    public void deleteStockByProductId(Long productId) {
+        // Không cần gọi API vì stock được quản lý trong inventory-service
+        // Method này chỉ để tương thích
+    }
+
+    /**
      * Lấy danh sách suppliers theo type
      */
     public java.util.List<SupplierDto> getSuppliersByType(String type) {

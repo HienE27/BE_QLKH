@@ -335,4 +335,10 @@ public class StockServiceImpl implements StockService {
             return 0;
         }
     }
+
+    @Override
+    @org.springframework.transaction.annotation.Transactional
+    public void deleteByProductId(Long productId) {
+        stockRepo.deleteByProductId(productId);
+    }
 }

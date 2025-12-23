@@ -7,4 +7,5 @@ import java.util.List;
 
 public interface ShopProductDiscountRepository extends JpaRepository<ShopProductDiscount, Long> {
     List<ShopProductDiscount> findByProductId(Long productId);
+    void deleteByProductId(Long productId);
 }

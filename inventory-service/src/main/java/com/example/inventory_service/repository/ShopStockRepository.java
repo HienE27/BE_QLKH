@@ -41,5 +41,10 @@ public interface ShopStockRepository extends JpaRepository<ShopStock, Long> {
     @Modifying
     @Query("UPDATE ShopStock s SET s.quantity = s.quantity - :amount WHERE s.productId = :productId AND s.storeId = :storeId")
     int decreaseQuantity(@Param("productId") Long productId, @Param("storeId") Long storeId, @Param("amount") Integer amount);
+    
+    /**
+     * Xóa tất cả tồn kho của 1 sản phẩm (tại tất cả các kho)
+     */
+    void deleteByProductId(Long productId);
 }
 

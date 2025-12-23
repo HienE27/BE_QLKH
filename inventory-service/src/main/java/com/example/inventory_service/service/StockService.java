@@ -40,4 +40,7 @@ public interface StockService {
 
     // Tạo hoặc cập nhật tồn kho
     StockByStoreDto createOrUpdateStock(com.example.inventory_service.dto.CreateStockRequest request);
+    
+    // Xóa tất cả tồn kho của 1 sản phẩm
+    void deleteByProductId(Long productId);
 }

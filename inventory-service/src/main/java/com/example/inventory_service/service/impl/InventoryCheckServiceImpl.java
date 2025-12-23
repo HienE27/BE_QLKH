@@ -35,6 +35,7 @@ public class InventoryCheckServiceImpl implements InventoryCheckService {
     private final InventoryCheckDetailRepository detailRepo;
     private final ProductServiceClient productClient;
     private final com.example.inventory_service.repository.ShopStoreRepository storeRepo;
+    private final com.example.inventory_service.repository.ShopStockRepository stockRepo;
     private com.example.inventory_service.repository.UserQueryRepository userRepo;
 
     public InventoryCheckServiceImpl(
@@ -42,11 +43,13 @@ public class InventoryCheckServiceImpl implements InventoryCheckService {
             InventoryCheckDetailRepository detailRepo,
             ProductServiceClient productClient,
             com.example.inventory_service.repository.ShopStoreRepository storeRepo,
+            com.example.inventory_service.repository.ShopStockRepository stockRepo,
             com.example.inventory_service.repository.UserQueryRepository userRepo) {
         this.checkRepo = checkRepo;
         this.detailRepo = detailRepo;
         this.productClient = productClient;
         this.storeRepo = storeRepo;
+        this.stockRepo = stockRepo;
         this.userRepo = userRepo;
     }
 
@@ -66,7 +69,8 @@ public class InventoryCheckServiceImpl implements InventoryCheckService {
         check.setStoreId(request.getStoreId());
         check.setDescription(request.getDescription());
         check.setStatus("PENDING");
-        // Nếu checkDate chỉ có date (không có time), set thời gian là thời gian hiện tại
+        // Nếu checkDate chỉ có date (không có time), set thời gian là thời gian hiện
+        // tại
         Date checkDateValue = request.getCheckDate();
         if (checkDateValue != null) {
             // Kiểm tra xem checkDate có chỉ là date (00:00:00) không
@@ -75,7 +79,7 @@ public class InventoryCheckServiceImpl implements InventoryCheckService {
             int hour = cal.get(java.util.Calendar.HOUR_OF_DAY);
             int minute = cal.get(java.util.Calendar.MINUTE);
             int second = cal.get(java.util.Calendar.SECOND);
-            
+
             // Nếu là 00:00:00, có thể là do frontend chỉ gửi date, set thời gian hiện tại
             if (hour == 0 && minute == 0 && second == 0) {
                 java.util.Calendar nowCal = java.util.Calendar.getInstance();
@@ -192,13 +196,15 @@ public class InventoryCheckServiceImpl implements InventoryCheckService {
                 .toList();
         if (!storeIds.isEmpty()) {
             storeMap.putAll(storeRepo.findAllById(storeIds).stream()
-                    .collect(Collectors.toMap(com.example.inventory_service.entity.ShopStore::getId, java.util.function.Function.identity())));
+                    .collect(Collectors.toMap(com.example.inventory_service.entity.ShopStore::getId,
+                            java.util.function.Function.identity())));
         }
 
         final Map<Long, List<InventoryCheckDetail>> detailsMapFinal = detailsMap;
         final Map<Long, com.example.inventory_service.entity.ShopStore> storeMapFinal = storeMap;
         return page.getContent().stream()
-                .map(check -> toDtoWithCalcTotal(check, detailsMapFinal.getOrDefault(check.getId(), List.of()), storeMapFinal))
+                .map(check -> toDtoWithCalcTotal(check, detailsMapFinal.getOrDefault(check.getId(), List.of()),
+                        storeMapFinal))
                 .toList();
     }
 
@@ -244,13 +250,15 @@ public class InventoryCheckServiceImpl implements InventoryCheckService {
                 .toList();
         if (!storeIds.isEmpty()) {
             storeMap.putAll(storeRepo.findAllById(storeIds).stream()
-                    .collect(Collectors.toMap(com.example.inventory_service.entity.ShopStore::getId, java.util.function.Function.identity())));
+                    .collect(Collectors.toMap(com.example.inventory_service.entity.ShopStore::getId,
+                            java.util.function.Function.identity())));
         }
 
         final Map<Long, List<InventoryCheckDetail>> detailsMapFinal = detailsMap;
         final Map<Long, com.example.inventory_service.entity.ShopStore> storeMapFinal = storeMap;
         List<InventoryCheckDto> dtoPage = checkPage.getContent().stream()
-                .map(check -> toDtoWithCalcTotal(check, detailsMapFinal.getOrDefault(check.getId(), List.of()), storeMapFinal))
+                .map(check -> toDtoWithCalcTotal(check, detailsMapFinal.getOrDefault(check.getId(), List.of()),
+                        storeMapFinal))
                 .toList();
 
         logger.debug("Search paged query took {}ms, processed {} records",
@@ -358,7 +366,8 @@ public class InventoryCheckServiceImpl implements InventoryCheckService {
         check.setUpdatedAt(new Date());
         check = checkRepo.save(check);
 
-        // Không cập nhật tồn kho ở đây, chờ Admin confirm
+        // Cập nhật tồn kho ngay khi duyệt
+        updateStockFromInventoryCheck(check.getId(), check.getStoreId());
 
         return toDtoWithCalcTotal(check);
     }
@@ -381,19 +390,8 @@ public class InventoryCheckServiceImpl implements InventoryCheckService {
         check.setUpdatedAt(new Date());
         check = checkRepo.save(check);
 
-        // Cập nhật tồn kho theo chênh lệch
-        List<InventoryCheckDetail> details = detailRepo.findByInventoryCheckId(id);
-        for (InventoryCheckDetail d : details) {
-            if (d.getDifferenceQuantity() != null && d.getDifferenceQuantity() != 0) {
-                if (d.getDifferenceQuantity() > 0) {
-                    // Thực tế nhiều hơn hệ thống → tăng tồn
-                    productClient.increaseQuantity(d.getProductId(), d.getDifferenceQuantity());
-                } else {
-                    // Thực tế ít hơn hệ thống → giảm tồn
-                    productClient.decreaseQuantity(d.getProductId(), Math.abs(d.getDifferenceQuantity()));
-                }
-            }
-        }
+        // Cập nhật tồn kho theo chênh lệch - cập nhật trực tiếp vào shop_stocks
+        updateStockFromInventoryCheck(check.getId(), check.getStoreId());
 
         return toDtoWithCalcTotal(check);
     }
@@ -460,6 +458,51 @@ public class InventoryCheckServiceImpl implements InventoryCheckService {
         }
 
         return raw;
+    }
+
+    /**
+     * Cập nhật tồn kho từ inventory check details
+     */
+    private void updateStockFromInventoryCheck(Long inventoryCheckId, Long storeId) {
+        if (storeId == null) {
+            throw new IllegalStateException("Phiếu kiểm kê không có kho hàng");
+        }
+
+        List<InventoryCheckDetail> details = detailRepo.findByInventoryCheckId(inventoryCheckId);
+
+        for (InventoryCheckDetail d : details) {
+            if (d.getDifferenceQuantity() != null && d.getDifferenceQuantity() != 0) {
+                Long productId = d.getProductId();
+                Integer diffQty = d.getDifferenceQuantity();
+
+                // Tìm hoặc tạo stock record
+                com.example.inventory_service.entity.ShopStock stock = stockRepo
+                        .findByProductIdAndStoreId(productId, storeId)
+                        .orElseGet(() -> {
+                            com.example.inventory_service.entity.ShopStock newStock = new com.example.inventory_service.entity.ShopStock();
+                            newStock.setProductId(productId);
+                            newStock.setStoreId(storeId);
+                            newStock.setQuantity(0);
+                            newStock.setMinStock(0);
+                            newStock.setMaxStock(999999);
+                            return stockRepo.save(newStock);
+                        });
+
+                // Cập nhật số lượng tồn kho
+                int newQuantity = stock.getQuantity() + diffQty;
+                if (newQuantity < 0) {
+                    logger.warn("Tồn kho âm sau khi kiểm kê: productId={}, storeId={}, quantity={}, diff={}",
+                            productId, storeId, stock.getQuantity(), diffQty);
+                    newQuantity = 0; // Không cho phép tồn kho âm
+                }
+
+                stock.setQuantity(newQuantity);
+                stockRepo.save(stock);
+
+                logger.info("Đã cập nhật tồn kho: productId={}, storeId={}, diff={}, newQuantity={}",
+                        productId, storeId, diffQty, newQuantity);
+            }
+        }
     }
 
     private InventoryCheckDto toDtoWithCalcTotal(InventoryCheck check) {
@@ -538,9 +581,9 @@ public class InventoryCheckServiceImpl implements InventoryCheckService {
                     dto.setStoreName(store.getName());
                 }
             } else {
-            storeRepo.findById(check.getStoreId()).ifPresent(store -> {
-                dto.setStoreName(store.getName());
-            });
+                storeRepo.findById(check.getStoreId()).ifPresent(store -> {
+                    dto.setStoreName(store.getName());
+                });
             }
         }
 
@@ -641,8 +684,8 @@ public class InventoryCheckServiceImpl implements InventoryCheckService {
                 System.err.println("⚠️ userRepo is null in getCurrentUserId");
                 return null;
             }
-            org.springframework.security.core.Authentication auth = 
-                org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+            org.springframework.security.core.Authentication auth = org.springframework.security.core.context.SecurityContextHolder
+                    .getContext().getAuthentication();
             if (auth != null && auth.getName() != null) {
                 String username = auth.getName();
                 System.out.println("🔍 Getting userId for username: " + username);
