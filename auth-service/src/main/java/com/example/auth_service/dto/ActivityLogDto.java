@@ -10,6 +10,7 @@ public class ActivityLogDto {
     private Long id;
     private Long userId;
     private String username;
+    private String displayName;
     private String action;
     private String resourceType;
     private Long resourceId;
@@ -24,6 +25,7 @@ public class ActivityLogDto {
         dto.setId(log.getId());
         dto.setUserId(log.getUserId());
         dto.setUsername(log.getUsername());
+        dto.setDisplayName(log.getDisplayName());
         dto.setAction(log.getAction());
         dto.setResourceType(log.getResourceType());
         dto.setResourceId(log.getResourceId());

@@ -25,6 +25,8 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 @Service
 public class InventoryCheckServiceImpl implements InventoryCheckService {
@@ -151,6 +153,23 @@ public class InventoryCheckServiceImpl implements InventoryCheckService {
 
         if (!details.isEmpty()) {
             detailRepo.saveAll(details);
+        }
+        // Send activity log for create
+        try {
+            String uname = getCurrentUsername();
+            if (uname == null) uname = getUserFullNameFromId(check.getCreatedBy());
+            if (uname == null) uname = "system";
+            sendActivityLog(
+                    check.getCreatedBy(),
+                    uname,
+                    "CREATE_INVENTORY_CHECK",
+                    "INVENTORY_CHECK",
+                    check.getId(),
+                    check.getCheckCode(),
+                    "Created inventory check: " + check.getCheckCode()
+            );
+        } catch (Exception e) {
+            logger.warn("Failed to send activity log for inventory check create: {}", e.getMessage());
         }
 
         return toDto(check, totalDiff);
@@ -369,6 +388,24 @@ public class InventoryCheckServiceImpl implements InventoryCheckService {
         // Cập nhật tồn kho ngay khi duyệt
         updateStockFromInventoryCheck(check.getId(), check.getStoreId());
 
+        // Send activity log for approve
+        try {
+            String uname = getCurrentUsername();
+            if (uname == null) uname = getUserFullNameFromId(check.getApprovedBy());
+            if (uname == null) uname = "system";
+            sendActivityLog(
+                    check.getApprovedBy(),
+                    uname,
+                    "APPROVE_INVENTORY_CHECK",
+                    "INVENTORY_CHECK",
+                    check.getId(),
+                    check.getCheckCode(),
+                    "Approved inventory check: " + check.getCheckCode()
+            );
+        } catch (Exception e) {
+            logger.warn("Failed to send activity log for inventory check approve: {}", e.getMessage());
+        }
+
         return toDtoWithCalcTotal(check);
     }
 
@@ -392,6 +429,24 @@ public class InventoryCheckServiceImpl implements InventoryCheckService {
 
         // Cập nhật tồn kho theo chênh lệch - cập nhật trực tiếp vào shop_stocks
         updateStockFromInventoryCheck(check.getId(), check.getStoreId());
+
+        // Send activity log for confirm
+        try {
+            String uname = getCurrentUsername();
+            if (uname == null) uname = getUserFullNameFromId(check.getConfirmedBy());
+            if (uname == null) uname = "system";
+            sendActivityLog(
+                    check.getConfirmedBy(),
+                    uname,
+                    "CONFIRM_INVENTORY_CHECK",
+                    "INVENTORY_CHECK",
+                    check.getId(),
+                    check.getCheckCode(),
+                    "Confirmed inventory check: " + check.getCheckCode()
+            );
+        } catch (Exception e) {
+            logger.warn("Failed to send activity log for inventory check confirm: {}", e.getMessage());
+        }
 
         return toDtoWithCalcTotal(check);
     }
@@ -420,6 +475,24 @@ public class InventoryCheckServiceImpl implements InventoryCheckService {
         System.out.println("✅ Set rejectedAt: " + check.getRejectedAt());
         check.setUpdatedAt(new Date());
         check = checkRepo.save(check);
+
+        // Send activity log for reject
+        try {
+            String uname = getCurrentUsername();
+            if (uname == null) uname = getUserFullNameFromId(check.getRejectedBy());
+            if (uname == null) uname = "system";
+            sendActivityLog(
+                    check.getRejectedBy(),
+                    uname,
+                    "REJECT_INVENTORY_CHECK",
+                    "INVENTORY_CHECK",
+                    check.getId(),
+                    check.getCheckCode(),
+                    "Rejected inventory check: " + check.getCheckCode()
+            );
+        } catch (Exception e) {
+            logger.warn("Failed to send activity log for inventory check reject: {}", e.getMessage());
+        }
 
         return toDtoWithCalcTotal(check);
     }
@@ -678,6 +751,61 @@ public class InventoryCheckServiceImpl implements InventoryCheckService {
         }
     }
 
+    /**
+     * Gửi activity log tới auth-service bằng Java 11 HttpClient.
+     */
+    private void sendActivityLog(Long userId, String username, String action, String resourceType, Long resourceId, String resourceName, String details) {
+        try {
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("userId", userId);
+            payload.put("username", username);
+            // try to include displayName if available
+            try {
+                String display = getUserFullNameFromId(userId);
+                payload.put("displayName", display != null ? display : username);
+            } catch (Exception ignored) {
+                payload.put("displayName", username);
+            }
+            payload.put("action", action);
+            payload.put("resourceType", resourceType);
+            payload.put("resourceId", resourceId);
+            payload.put("resourceName", resourceName);
+            payload.put("details", details);
+
+            String json = mapper.writeValueAsString(payload);
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            String authUrl = System.getenv("AUTH_SERVICE_URL");
+            if (authUrl == null || authUrl.isBlank()) {
+                authUrl = "http://localhost:8080";
+            }
+            String endpoint = authUrl.endsWith("/") ? authUrl + "api/internal/activity-logs" : authUrl + "/api/internal/activity-logs";
+            java.net.http.HttpRequest.Builder builder = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(endpoint))
+                    .header("Content-Type", "application/json");
+            String token = System.getenv("ACTIVITY_LOG_SERVICE_TOKEN");
+            if (token != null && !token.isBlank()) {
+                builder.header("X-Activity-Log-Token", token);
+            }
+            java.net.http.HttpRequest req = builder.POST(java.net.http.HttpRequest.BodyPublishers.ofString(json)).build();
+            System.out.println("Sending activity log to: " + endpoint + " payload: " + json);
+            client.sendAsync(req, java.net.http.HttpResponse.BodyHandlers.ofString())
+                    .thenAccept(resp -> {
+                        if (resp.statusCode() >= 400) {
+                            logger.warn("Auth-service returned {} when sending activity log: {}", resp.statusCode(), resp.body());
+                        } else {
+                            System.out.println("Activity log sent, status: " + resp.statusCode());
+                        }
+                    })
+                    .exceptionally(ex -> {
+                        logger.warn("Failed to send activity log: {}", ex.getMessage());
+                        return null;
+                    });
+        } catch (Exception e) {
+            logger.warn("sendActivityLog failed: {}", e.getMessage());
+        }
+    }
+
     private Long getCurrentUserId() {
         try {
             if (userRepo == null) {
@@ -702,6 +830,18 @@ public class InventoryCheckServiceImpl implements InventoryCheckService {
         } catch (Exception e) {
             System.err.println("⚠️ Failed to get current userId: " + e.getMessage());
             e.printStackTrace();
+        }
+        return null;
+    }
+
+    private String getCurrentUsername() {
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            if (auth != null && auth.getName() != null) {
+                return auth.getName();
+            }
+        } catch (Exception e) {
+            // ignore
         }
         return null;
     }

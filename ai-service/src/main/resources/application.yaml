@@ -11,7 +11,7 @@ eureka:
       defaultZone: http://discovery-server:8761/eureka
 
 jwt:
-  secret: this-is-my-ultra-long-jwt-secret-key-Viethien1@7890
+  secret: this-is-my-ultra-long-jwt-secret-key-1234567890
   expiration-ms: 86400000
 
 gemini:

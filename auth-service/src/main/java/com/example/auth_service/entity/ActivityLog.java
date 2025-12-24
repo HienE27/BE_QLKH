@@ -20,6 +20,9 @@ public class ActivityLog {
 
     @Column(name = "username")
     private String username;
+    
+    @Column(name = "display_name")
+    private String displayName;
 
     @Column(name = "action")
     private String action; // LOGIN, CREATE_USER, UPDATE_USER, DELETE_USER, etc.

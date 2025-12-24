@@ -38,6 +38,7 @@ public class ActivityLogServiceImpl implements ActivityLogService {
         ActivityLog log = new ActivityLog();
         log.setUserId(logDto.getUserId());
         log.setUsername(logDto.getUsername());
+        log.setDisplayName(logDto.getDisplayName());
         log.setAction(logDto.getAction());
         log.setResourceType(logDto.getResourceType());
         log.setResourceId(logDto.getResourceId());

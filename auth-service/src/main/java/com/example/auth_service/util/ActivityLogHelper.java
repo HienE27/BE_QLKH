@@ -57,7 +57,18 @@ public class ActivityLogHelper {
             log.setResourceType(resourceType);
             log.setResourceId(resourceId);
             log.setResourceName(resourceName);
-            log.setDetails(details);
+            // translate and normalize details to Vietnamese for storage/display
+            log.setDetails(translateDetails(details, action, resourceName));
+            // try to set displayName from user repository (first+last) if available
+            try {
+                userRepository.findByUsername(username).ifPresent(u -> {
+                    String full = ((u.getFirstName() != null ? u.getFirstName().trim() : "") + " " + (u.getLastName() != null ? u.getLastName().trim() : "")).trim();
+                    if (full.isEmpty()) full = username;
+                    log.setDisplayName(full);
+                });
+            } catch (Exception ignore) {
+                log.setDisplayName(username);
+            }
             log.setIpAddress(ipAddress);
             log.setUserAgent(userAgent);
             log.setCreatedAt(new Date());
@@ -88,7 +99,7 @@ public class ActivityLogHelper {
             log.setResourceType(resourceType);
             log.setResourceId(resourceId);
             log.setResourceName(resourceName);
-            log.setDetails(details);
+            log.setDetails(translateDetails(details, action, resourceName));
             log.setIpAddress(ipAddress);
             log.setUserAgent(userAgent);
             log.setCreatedAt(new Date());
@@ -99,6 +110,48 @@ public class ActivityLogHelper {
         } catch (Exception e) {
             System.err.println("ActivityLogHelper: Failed to log activity: " + action + " - " + e.getMessage());
             e.printStackTrace();
+        }
+    }
+
+    /**
+     * Translate / normalize English detail string into Vietnamese for display.
+     * If details is null or empty, produce a sensible default based on action and resourceName.
+     */
+    private String translateDetails(String details, String action, String resourceName) {
+        if (details == null || details.isBlank()) {
+            if (action == null) return "-";
+            return switch (action) {
+                case "LOGIN" -> "Đăng nhập";
+                case "LOGOUT" -> "Đăng xuất";
+                case "CREATE_USER" -> "Tạo thành viên: " + (resourceName != null ? resourceName : "-");
+                case "DELETE_USER" -> "Xóa thành viên: " + (resourceName != null ? resourceName : "-");
+                case "CREATE_ROLE" -> "Tạo vai trò: " + (resourceName != null ? resourceName : "-");
+                case "DELETE_ROLE" -> "Xóa vai trò: " + (resourceName != null ? resourceName : "-");
+                case "UPDATE_ROLE_PERMISSIONS" -> "Cập nhật phân quyền vai trò: " + (resourceName != null ? resourceName : "-");
+                case "UPDATE_USER_PERMISSIONS" -> "Cập nhật phân quyền thành viên: " + (resourceName != null ? resourceName : "-");
+                case "RESET_PASSWORD", "RESET_PASSWORD_WITH_TOKEN" -> "Đặt lại mật khẩu";
+                default -> "-";
+            };
+        }
+
+        // Simple regex-based replacements for common English messages
+        try {
+            String out = details;
+            out = out.replaceAll("(?i)Created new user:\\s*(.+)", "Tạo thành viên: $1");
+            out = out.replaceAll("(?i)Deleted user:\\s*(.+)", "Xóa thành viên: $1");
+            out = out.replaceAll("(?i)Created new role:\\s*(.+)", "Tạo vai trò: $1");
+            out = out.replaceAll("(?i)Deleted role:\\s*(.+)", "Xóa vai trò: $1");
+            out = out.replaceAll("(?i)Updated permissions for role:\\s*(.+)", "Cập nhật phân quyền vai trò: $1");
+            out = out.replaceAll("(?i)Updated direct permissions for user:\\s*(.+)", "Cập nhật phân quyền trực tiếp cho thành viên: $1");
+            out = out.replaceAll("(?i)Updated user information", "Cập nhật thông tin thành viên");
+            out = out.replaceAll("(?i)User logged in successfully", "Đăng nhập");
+            out = out.replaceAll("(?i)User logged out", "Đăng xuất");
+            out = out.replaceAll("(?i)Failed login attempt", "Đăng nhập thất bại");
+            out = out.replaceAll("(?i)Password reset requested", "Yêu cầu đặt lại mật khẩu");
+            out = out.replaceAll("(?i)Account locked until (.+) due to too many failed login attempts", "Tài khoản bị khóa đến $1 do quá nhiều lần đăng nhập thất bại");
+            return out;
+        } catch (Exception e) {
+            return details; // fallback to original
         }
     }
 

@@ -135,6 +135,17 @@ public class ImportServiceImpl implements ImportService {
 
         im = importRepo.save(im);
 
+        // Ghi nhật ký hoạt động: tạo phiếu nhập (receipt)
+        try {
+            Long uid = currentUserId;
+            String uname = getCurrentUsername();
+            if (uname == null) uname = "system";
+            System.out.println("Preparing to send activity log: action=CREATE_RECEIPT, resourceType=IMPORT, resourceId=" + im.getId() + ", userId=" + uid + ", username=" + uname + ", code=" + im.getCode());
+            sendActivityLog(uid, uname, "CREATE_RECEIPT", "IMPORT", im.getId(), im.getCode(), "Created import: " + im.getCode());
+        } catch (Exception e) {
+            logger.warn("Failed to send activity log for import create: {}", e.getMessage());
+        }
+
         // Lưu chi tiết
         BigDecimal total = BigDecimal.ZERO;
         List<ShopImportDetail> details = new ArrayList<>();
@@ -452,6 +463,15 @@ public class ImportServiceImpl implements ImportService {
         }
         im.setUpdatedAt(now);
         im = importRepo.save(im);
+        try {
+            Long uid = getCurrentUserId();
+            String uname = getCurrentUsername();
+            if (uname == null) uname = "system";
+            System.out.println("Preparing to send activity log: action=APPROVE_RECEIPT, resourceType=IMPORT, resourceId=" + im.getId() + ", userId=" + uid + ", username=" + uname + ", code=" + im.getCode());
+            sendActivityLog(uid, uname, "APPROVE_RECEIPT", "IMPORT", im.getId(), im.getCode(), "Approved import: " + im.getCode());
+        } catch (Exception e) {
+            logger.warn("Failed to send activity log for import approve: {}", e.getMessage());
+        }
 
         return toDtoWithCalcTotal(im);
     }
@@ -475,6 +495,15 @@ public class ImportServiceImpl implements ImportService {
         }
         im.setUpdatedAt(now);
         im = importRepo.save(im);
+        try {
+            Long uid = getCurrentUserId();
+            String uname = getCurrentUsername();
+            if (uname == null) uname = "system";
+            System.out.println("Preparing to send activity log: action=APPROVE_RECEIPT, resourceType=IMPORT, resourceId=" + im.getId() + ", userId=" + uid + ", username=" + uname + ", code=" + im.getCode());
+            sendActivityLog(uid, uname, "APPROVE_RECEIPT", "IMPORT", im.getId(), im.getCode(), "Confirmed import (imported): " + im.getCode());
+        } catch (Exception e) {
+            logger.warn("Failed to send activity log for import confirm: {}", e.getMessage());
+        }
 
         // Cập nhật tồn kho vào shop_stocks
         List<ShopImportDetail> details = detailRepo.findByImportId(id);
@@ -517,6 +546,15 @@ public class ImportServiceImpl implements ImportService {
         im.setStatus(ImportStatus.CANCELLED);
         im.setUpdatedAt(LocalDateTime.now());
         im = importRepo.save(im);
+        try {
+            Long uid = getCurrentUserId();
+            String uname = getCurrentUsername();
+            if (uname == null) uname = "system";
+            System.out.println("Preparing to send activity log: action=CANCEL_RECEIPT, resourceType=IMPORT, resourceId=" + im.getId() + ", userId=" + uid + ", username=" + uname + ", code=" + im.getCode());
+            sendActivityLog(uid, uname, "CANCEL_RECEIPT", "IMPORT", im.getId(), im.getCode(), "Cancelled import: " + im.getCode());
+        } catch (Exception e) {
+            logger.warn("Failed to send activity log for import cancel: {}", e.getMessage());
+        }
 
         return toDtoWithCalcTotal(im);
     }
@@ -540,6 +578,15 @@ public class ImportServiceImpl implements ImportService {
         }
         im.setUpdatedAt(now);
         im = importRepo.save(im);
+        try {
+            Long uid = getCurrentUserId();
+            String uname = getCurrentUsername();
+            if (uname == null) uname = "system";
+            System.out.println("Preparing to send activity log: action=CANCEL_RECEIPT, resourceType=IMPORT, resourceId=" + im.getId() + ", userId=" + uid + ", username=" + uname + ", code=" + im.getCode());
+            sendActivityLog(uid, uname, "CANCEL_RECEIPT", "IMPORT", im.getId(), im.getCode(), "Rejected import: " + im.getCode());
+        } catch (Exception e) {
+            logger.warn("Failed to send activity log for import reject: {}", e.getMessage());
+        }
 
         return toDtoWithCalcTotal(im);
     }
@@ -829,6 +876,61 @@ public class ImportServiceImpl implements ImportService {
         }
 
         return raw;
+    }
+
+    /**
+     * Gửi activity log tới auth-service bằng Java 11 HttpClient.
+     */
+    private void sendActivityLog(Long userId, String username, String action, String resourceType, Long resourceId, String resourceName, String details) {
+        try {
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("userId", userId);
+            payload.put("username", username);
+            // include displayName if available (try to resolve full name), fallback to username in controller
+            try {
+                payload.put("displayName", getUserFullName(username));
+            } catch (Exception ignored) {
+                payload.put("displayName", username);
+            }
+            payload.put("action", action);
+            payload.put("resourceType", resourceType);
+            payload.put("resourceId", resourceId);
+            payload.put("resourceName", resourceName);
+            payload.put("details", details);
+
+            String json = mapper.writeValueAsString(payload);
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            String authUrl = System.getenv("AUTH_SERVICE_URL");
+            if (authUrl == null || authUrl.isBlank()) {
+                authUrl = "http://localhost:8080";
+            }
+            // Use internal endpoint and include internal token header
+            String endpoint = authUrl.endsWith("/") ? authUrl + "api/internal/activity-logs" : authUrl + "/api/internal/activity-logs";
+            java.net.http.HttpRequest.Builder builder = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(endpoint))
+                    .header("Content-Type", "application/json");
+            String token = System.getenv("ACTIVITY_LOG_SERVICE_TOKEN");
+            if (token != null && !token.isBlank()) {
+                builder.header("X-Activity-Log-Token", token);
+            }
+            java.net.http.HttpRequest req = builder.POST(java.net.http.HttpRequest.BodyPublishers.ofString(json)).build();
+            System.out.println("Sending activity log to: " + endpoint + " payload: " + json + " tokenPresent=" + (token != null && !token.isBlank()));
+            client.sendAsync(req, java.net.http.HttpResponse.BodyHandlers.ofString())
+                    .thenAccept(resp -> {
+                        if (resp.statusCode() >= 400) {
+                            logger.warn("Auth-service returned {} when sending activity log: {}", resp.statusCode(), resp.body());
+                        } else {
+                            System.out.println("Activity log sent, status: " + resp.statusCode());
+                        }
+                    })
+                    .exceptionally(ex -> {
+                        logger.warn("Failed to send activity log: {}", ex.getMessage());
+                        return null;
+                    });
+        } catch (Exception e) {
+            logger.warn("sendActivityLog failed: {}", e.getMessage());
+        }
     }
 
     private SupplierImportDto toDtoWithCalcTotal(ShopImport im) {

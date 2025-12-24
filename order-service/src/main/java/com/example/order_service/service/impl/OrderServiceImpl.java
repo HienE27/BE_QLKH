@@ -1,5 +1,8 @@
 package com.example.order_service.service.impl;
 
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+
 import com.example.order_service.dto.*;
 import com.example.order_service.entity.ShopOrder;
 import com.example.order_service.entity.ShopOrderDetail;
@@ -107,6 +110,25 @@ public class OrderServiceImpl implements OrderService {
         order.setDiscountAmount(discount);
 
         order = orderRepo.save(order);
+
+        // Ghi nhật ký hoạt động bằng cách gọi auth-service
+        try {
+            String uname = getCurrentUsername();
+            if (uname == null) uname = "system";
+            System.out.println("Preparing to send activity log: action=CREATE_ORDER, resourceType=ORDER, resourceId=" + order.getId() + ", userId=" + order.getUserId() + ", username=" + uname);
+            sendActivityLog(
+                    order.getUserId(),
+                    uname,
+                    "CREATE_ORDER",
+                    "ORDER",
+                    order.getId(),
+                    "ORDER#" + order.getId(),
+                    String.format("Created order: %s", order.getId())
+            );
+        } catch (Exception e) {
+            // Không gây hỏng flow nếu log fail
+            System.out.println("Failed to send activity log for CREATE_ORDER: " + e.getMessage());
+        }
 
         // 3. lưu chi tiết
         if (req.getDetails() != null) {
@@ -232,6 +254,47 @@ public class OrderServiceImpl implements OrderService {
         return dto;
     }
 
+    /**
+     * Gửi activity log tới auth-service bằng WebClient.
+     * Payload tương ứng với ActivityLogDto trên auth-service.
+     */
+    private void sendActivityLog(Long userId, String username, String action, String resourceType, Long resourceId, String resourceName, String details) {
+        try {
+            java.util.Map<String, Object> payload = new java.util.HashMap<>();
+            payload.put("userId", userId);
+            payload.put("username", username);
+            // include displayName (fallback to username)
+            payload.put("displayName", username);
+            payload.put("action", action);
+            payload.put("resourceType", resourceType);
+            payload.put("resourceId", resourceId);
+            payload.put("resourceName", resourceName);
+            payload.put("details", details);
+            String authUrl = System.getenv("AUTH_SERVICE_URL");
+            if (authUrl == null || authUrl.isBlank()) {
+                authUrl = "http://localhost:8080";
+            }
+            String uri = authUrl.endsWith("/") ? authUrl + "api/internal/activity-logs" : authUrl + "/api/internal/activity-logs";
+            System.out.println("Sending activity log to: " + uri + " payload: " + payload);
+            String token = System.getenv("ACTIVITY_LOG_SERVICE_TOKEN");
+            org.springframework.web.reactive.function.client.WebClient.RequestBodySpec reqSpec = webClientBuilder.build()
+                    .post()
+                    .uri(uri);
+            if (token != null && !token.isBlank()) {
+                reqSpec = reqSpec.header("X-Activity-Log-Token", token);
+            }
+            reqSpec.bodyValue(payload)
+                    .retrieve()
+                    .toBodilessEntity()
+                    .doOnSuccess(resp -> System.out.println("Activity log sent, status: " + (resp != null ? resp.getStatusCode() : "null")))
+                    .doOnError(err -> System.out.println("Activity log send error: " + err.getMessage()))
+                    .block();
+        } catch (Exception e) {
+            // Bỏ qua lỗi, chỉ log ra console
+            System.out.println("sendActivityLog error: " + e.getMessage());
+        }
+    }
+
     @Override
     public OrderDto updateStatus(Long id, OrderStatusUpdateRequest req) {
         ShopOrder order = orderRepo.findById(id)
@@ -254,6 +317,33 @@ public class OrderServiceImpl implements OrderService {
         }
 
         order = orderRepo.save(order);
+
+        // Ghi nhật ký cho việc thay đổi trạng thái (duyệt/hủy...)
+        try {
+            String action = null;
+            if ("APPROVED".equalsIgnoreCase(status) || "CONFIRMED".equalsIgnoreCase(status)) {
+                action = "APPROVE_ORDER";
+            } else if ("CANCELLED".equalsIgnoreCase(status) || "CANCELED".equalsIgnoreCase(status)) {
+                action = "CANCEL_ORDER";
+            }
+
+            if (action != null) {
+                String uname = getCurrentUsername();
+                if (uname == null) uname = "system";
+                System.out.println("Preparing to send activity log: action=" + action + ", resourceType=ORDER, resourceId=" + order.getId() + ", userId=" + order.getUserId() + ", username=" + uname);
+                sendActivityLog(
+                        order.getUserId(),
+                        uname,
+                        action,
+                        "ORDER",
+                        order.getId(),
+                        "ORDER#" + order.getId(),
+                        String.format("%s order: %s", action, order.getId())
+                );
+            }
+        } catch (Exception e) {
+            System.out.println("Failed to send activity log for status change: " + e.getMessage());
+        }
 
         List<ShopOrderDetail> details = detailRepo.findByOrderId(order.getId());
         return toDto(order, details);
@@ -289,6 +379,20 @@ public class OrderServiceImpl implements OrderService {
         dto.setTotalDiscount(java.math.BigDecimal.valueOf(totalDiscount));
 
         return dto;
+    }
+
+    private String getCurrentUsername() {
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            if (auth != null && auth.getPrincipal() instanceof org.springframework.security.core.userdetails.UserDetails) {
+                return ((org.springframework.security.core.userdetails.UserDetails) auth.getPrincipal()).getUsername();
+            }
+            if (auth != null && auth.getPrincipal() instanceof String) {
+                return (String) auth.getPrincipal();
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
     }
 
 }

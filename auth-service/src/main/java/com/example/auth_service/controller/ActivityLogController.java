@@ -9,6 +9,12 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.beans.factory.annotation.Value;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Date;
 import java.util.List;
@@ -22,6 +28,9 @@ public class ActivityLogController {
     public ActivityLogController(ActivityLogService activityLogService) {
         this.activityLogService = activityLogService;
     }
+
+    @Value("${ACTIVITY_LOG_SERVICE_TOKEN:}")
+    private String activityLogServiceToken;
 
     @GetMapping
     @PreAuthorize("hasAuthority('ADMIN') or hasAuthority('MANAGER')")
@@ -80,6 +89,36 @@ public class ActivityLogController {
     ) {
         com.example.auth_service.dto.ActivityLogStatisticsDto stats = activityLogService.getStatistics(startDate, endDate);
         return ApiResponse.ok(stats);
+    }
+
+    @PostMapping
+    // Allow services/admins to create activity logs (services should authenticate or present token)
+    public ApiResponse<ActivityLogDto> createActivityLog(@RequestBody ActivityLogDto logDto, HttpServletRequest request) {
+        String authHeader = request.getHeader("X-Activity-Log-Token");
+        boolean tokenProvided = activityLogServiceToken != null && !activityLogServiceToken.isBlank();
+        boolean tokenValid = false;
+        if (tokenProvided && authHeader != null && authHeader.equals(activityLogServiceToken)) {
+            tokenValid = true;
+        }
+
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        boolean userAuthenticated = false;
+        if (auth != null && auth.isAuthenticated()) {
+            Object principal = auth.getPrincipal();
+            if (principal != null && !"anonymousUser".equals(principal)) {
+                userAuthenticated = true;
+            }
+        }
+
+        System.out.println("[ActivityLogController] tokenHeaderPresent=" + (authHeader != null) + ", tokenConfigured=" + (activityLogServiceToken != null && !activityLogServiceToken.isBlank()) + ", tokenValid=" + tokenValid + ", userAuthenticated=" + userAuthenticated);
+
+        if (!tokenValid && !userAuthenticated) {
+            // neither service token nor authenticated user -> forbidden
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Forbidden");
+        }
+
+        ActivityLogDto created = activityLogService.createActivityLog(logDto);
+        return ApiResponse.ok(created);
     }
 
     @GetMapping("/user/{userId}")

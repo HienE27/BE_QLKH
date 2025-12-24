@@ -20,6 +20,11 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -124,6 +129,17 @@ public class ExportServiceImpl implements ExportService {
         }
 
         export = exportRepo.save(export);
+
+        // Ghi nhật ký hoạt động: tạo phiếu xuất
+        try {
+            Long uid = currentUserId;
+            String uname = getCurrentUsername();
+            if (uname == null) uname = "system";
+            System.out.println("Preparing to send activity log: action=CREATE_DELIVERY, resourceType=EXPORT, resourceId=" + export.getId() + ", userId=" + uid + ", username=" + uname + ", code=" + export.getCode());
+            sendActivityLog(uid, uname, "CREATE_DELIVERY", "EXPORT", export.getId(), export.getCode(), "Created export: " + export.getCode());
+        } catch (Exception e) {
+            logger.warn("Failed to send activity log for export create: {}", e.getMessage());
+        }
 
         // Chi tiết phiếu xuất
         BigDecimal total = BigDecimal.ZERO;
@@ -527,6 +543,16 @@ public class ExportServiceImpl implements ExportService {
         }
         export.setUpdatedAt(LocalDateTime.now());
         export = exportRepo.save(export);
+        // Ghi nhật ký: duyệt phiếu xuất
+        try {
+            Long uid = getCurrentUserId();
+            String uname = getCurrentUsername();
+            if (uname == null) uname = "system";
+            System.out.println("Preparing to send activity log: action=APPROVE_DELIVERY, resourceType=EXPORT, resourceId=" + export.getId() + ", userId=" + uid + ", username=" + uname + ", code=" + export.getCode());
+            sendActivityLog(uid, uname, "APPROVE_DELIVERY", "EXPORT", export.getId(), export.getCode(), "Approved export: " + export.getCode());
+        } catch (Exception e) {
+            logger.warn("Failed to send activity log for export approve: {}", e.getMessage());
+        }
 
         return toDtoWithCalcTotal(export);
     }
@@ -582,6 +608,17 @@ public class ExportServiceImpl implements ExportService {
         export.setUpdatedAt(LocalDateTime.now());
         export = exportRepo.save(export);
 
+        // Ghi nhật ký: xác nhận xuất kho (đã xuất)
+        try {
+            Long uid = getCurrentUserId();
+            String uname = getCurrentUsername();
+            if (uname == null) uname = "system";
+            System.out.println("Preparing to send activity log: action=APPROVE_DELIVERY, resourceType=EXPORT, resourceId=" + export.getId() + ", userId=" + uid + ", username=" + uname + ", code=" + export.getCode());
+            sendActivityLog(uid, uname, "APPROVE_DELIVERY", "EXPORT", export.getId(), export.getCode(), "Confirmed export (exported): " + export.getCode());
+        } catch (Exception e) {
+            logger.warn("Failed to send activity log for export confirm: {}", e.getMessage());
+        }
+
         // Trừ tồn kho từ shop_stocks (mỗi dòng trừ tại kho riêng)
         for (ShopExportDetail d : details) {
             if (d.getQuantity() != null && d.getQuantity() > 0 && d.getStoreId() != null) {
@@ -613,6 +650,16 @@ public class ExportServiceImpl implements ExportService {
         export.setUpdatedAt(LocalDateTime.now());
         export = exportRepo.save(export);
 
+        try {
+            Long uid = getCurrentUserId();
+            String uname = getCurrentUsername();
+            if (uname == null) uname = "system";
+            System.out.println("Preparing to send activity log: action=CANCEL_ORDER, resourceType=EXPORT, resourceId=" + export.getId() + ", userId=" + uid + ", username=" + uname + ", code=" + export.getCode());
+            sendActivityLog(uid, uname, "CANCEL_ORDER", "EXPORT", export.getId(), export.getCode(), "Cancelled export: " + export.getCode());
+        } catch (Exception e) {
+            logger.warn("Failed to send activity log for export cancel: {}", e.getMessage());
+        }
+
         return toDtoWithCalcTotal(export);
     }
 
@@ -634,6 +681,16 @@ public class ExportServiceImpl implements ExportService {
         }
         export.setUpdatedAt(LocalDateTime.now());
         export = exportRepo.save(export);
+
+        try {
+            Long uid = getCurrentUserId();
+            String uname = getCurrentUsername();
+            if (uname == null) uname = "system";
+            System.out.println("Preparing to send activity log: action=CANCEL_ORDER, resourceType=EXPORT, resourceId=" + export.getId() + ", userId=" + uid + ", username=" + uname + ", code=" + export.getCode());
+            sendActivityLog(uid, uname, "CANCEL_ORDER", "EXPORT", export.getId(), export.getCode(), "Rejected export: " + export.getCode());
+        } catch (Exception e) {
+            logger.warn("Failed to send activity log for export reject: {}", e.getMessage());
+        }
 
         return toDtoWithCalcTotal(export);
     }
@@ -1076,6 +1133,60 @@ public class ExportServiceImpl implements ExportService {
     }
     
     /**
+     * Gửi activity log tới auth-service bằng Java 11 HttpClient.
+     */
+    private void sendActivityLog(Long userId, String username, String action, String resourceType, Long resourceId, String resourceName, String details) {
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("userId", userId);
+            payload.put("username", username);
+            // include displayName if available
+            try {
+                payload.put("displayName", getUserFullName(username));
+            } catch (Exception ignored) {
+                payload.put("displayName", username);
+            }
+            payload.put("action", action);
+            payload.put("resourceType", resourceType);
+            payload.put("resourceId", resourceId);
+            payload.put("resourceName", resourceName);
+            payload.put("details", details);
+
+            String json = mapper.writeValueAsString(payload);
+            HttpClient client = HttpClient.newHttpClient();
+            String authUrl = System.getenv("AUTH_SERVICE_URL");
+            if (authUrl == null || authUrl.isBlank()) {
+                authUrl = "http://localhost:8080";
+            }
+            String endpoint = authUrl.endsWith("/") ? authUrl + "api/internal/activity-logs" : authUrl + "/api/internal/activity-logs";
+            HttpRequest.Builder builder = HttpRequest.newBuilder()
+                    .uri(URI.create(endpoint))
+                    .header("Content-Type", "application/json");
+            String token = System.getenv("ACTIVITY_LOG_SERVICE_TOKEN");
+            if (token != null && !token.isBlank()) {
+                builder.header("X-Activity-Log-Token", token);
+            }
+            HttpRequest req = builder.POST(HttpRequest.BodyPublishers.ofString(json)).build();
+            System.out.println("Sending activity log to: " + endpoint + " payload: " + json);
+            client.sendAsync(req, HttpResponse.BodyHandlers.ofString())
+                    .thenAccept(resp -> {
+                        if (resp.statusCode() >= 400) {
+                            logger.warn("Auth-service returned {} when sending activity log: {}", resp.statusCode(), resp.body());
+                        } else {
+                            System.out.println("Activity log sent, status: " + resp.statusCode());
+                        }
+                    })
+                    .exceptionally(ex -> {
+                        logger.warn("Failed to send activity log: {}", ex.getMessage());
+                        return null;
+                    });
+        } catch (Exception e) {
+            logger.warn("sendActivityLog failed: {}", e.getMessage());
+        }
+    }
+    
+    /**
      * Lấy role từ userId bằng cách query database
      */
     private String getUserRoleFromId(Long userId) {
@@ -1088,6 +1199,25 @@ public class ExportServiceImpl implements ExportService {
         } catch (Exception e) {
             System.err.println("⚠️ Failed to get user role from userId " + userId + ": " + e.getMessage());
             return null;
+        }
+    }
+
+    /**
+     * Lấy tên đầy đủ của user từ username
+     */
+    @SuppressWarnings("unused")
+    private String getUserFullName(String username) {
+        try {
+            if (userRepo == null) {
+                return username;
+            }
+            return userRepo.findFullNameByUsername(username)
+                    .map(name -> name.trim())
+                    .filter(name -> !name.isEmpty())
+                    .orElse(username);
+        } catch (Exception e) {
+            System.err.println("⚠️ Failed to get user full name: " + e.getMessage());
+            return username;
         }
     }
 

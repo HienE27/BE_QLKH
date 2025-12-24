@@ -19,6 +19,8 @@ services:
       SPRING_APPLICATION_NAME: api-gateway
       # override eureka url (trong container sẽ gọi discovery-server theo tên service)
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka
+      # URL để các service gọi auth-service (dùng trong sendActivityLog)
+      AUTH_SERVICE_URL: http://auth-service:8087
 
   auth-service:
     build: ./auth-service
@@ -32,13 +34,15 @@ services:
       SPRING_APPLICATION_NAME: auth-service
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka
       # dùng MySQL đang chạy trên Windows
-      SPRING_DATASOURCE_URL: jdbc:mysql://host.docker.internal:3306/qlkh?allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=Asia/Ho_Chi_Minh
+      SPRING_DATASOURCE_URL: jdbc:mysql://host.docker.internal:3306/qlkh?allowPublicKeyRetrieval=true&useSSL=false&useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Ho_Chi_Minh
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: 123456
       # Email toggles (default false; override via .env)
       APP_EMAIL_ENABLED: ${APP_EMAIL_ENABLED:-false}
       APP_EMAIL_FROM: ${APP_EMAIL_FROM:-no-reply@qlkh.local}
       APP_FRONTEND_BASE_URL: ${APP_FRONTEND_BASE_URL:-http://localhost:3000}
+      # Token used by internal services when calling auth-service /api/activity-logs
+      ACTIVITY_LOG_SERVICE_TOKEN: activity-token-qlkh-2025
 
       # SMTP (default MailHog; override via .env to use Gmail SMTP)
       SPRING_MAIL_HOST: ${SPRING_MAIL_HOST:-mailhog}
@@ -59,9 +63,12 @@ services:
       # Ensure gateway can resolve instance address from Eureka inside Docker network
       EUREKA_INSTANCE_PREFER_IP_ADDRESS: "true"
       EUREKA_INSTANCE_HOSTNAME: order-service
-      SPRING_DATASOURCE_URL: jdbc:mysql://host.docker.internal:3306/qlkh?allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=Asia/Ho_Chi_Minh
+      SPRING_DATASOURCE_URL: jdbc:mysql://host.docker.internal:3306/qlkh?allowPublicKeyRetrieval=true&useSSL=false&useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Ho_Chi_Minh
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: 123456
+      # URL để các service gọi auth-service (dùng trong sendActivityLog)
+      AUTH_SERVICE_URL: http://auth-service:8087
+      ACTIVITY_LOG_SERVICE_TOKEN: activity-token-qlkh-2025
 
   inventory-service:
     build: ./inventory-service
@@ -71,9 +78,12 @@ services:
     environment:
       SPRING_APPLICATION_NAME: inventory-service
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka
-      SPRING_DATASOURCE_URL: jdbc:mysql://host.docker.internal:3306/qlkh?allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=Asia/Ho_Chi_Minh
+      SPRING_DATASOURCE_URL: jdbc:mysql://host.docker.internal:3306/qlkh?allowPublicKeyRetrieval=true&useSSL=false&useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Ho_Chi_Minh
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: 123456
+      # URL để các service gọi auth-service (dùng trong sendActivityLog)
+      AUTH_SERVICE_URL: http://auth-service:8087
+      ACTIVITY_LOG_SERVICE_TOKEN: activity-token-qlkh-2025
 
   product-service:
     build: ./product-service
@@ -83,13 +93,16 @@ services:
     environment:
       SPRING_APPLICATION_NAME: product-service
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka
-      SPRING_DATASOURCE_URL: jdbc:mysql://host.docker.internal:3306/qlkh?allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=Asia/Ho_Chi_Minh
+      SPRING_DATASOURCE_URL: jdbc:mysql://host.docker.internal:3306/qlkh?allowPublicKeyRetrieval=true&useSSL=false&useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Ho_Chi_Minh
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: 123456
-
+      # URL để các service gọi auth-service (dùng trong sendActivityLog)
+      AUTH_SERVICE_URL: http://auth-service:8087
+      ACTIVITY_LOG_SERVICE_TOKEN: activity-token-qlkh-2025
     volumes:
       # map thư mục uploads trên máy thật vào /app/uploads trong container
       - ./product-service/uploads:/app/uploads
+      
 
 
   promotion-service:
@@ -103,6 +116,9 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://host.docker.internal:3306/qlkh?allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=Asia/Ho_Chi_Minh
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: 123456
+      # URL để các service gọi auth-service (dùng trong sendActivityLog)
+      AUTH_SERVICE_URL: http://auth-service:8087
+      ACTIVITY_LOG_SERVICE_TOKEN: activity-token-qlkh-2025
 
   settings-cms-service:
     build: ./settings-cms-service
@@ -115,6 +131,8 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://host.docker.internal:3306/qlkh?allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=Asia/Ho_Chi_Minh
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: 123456
+      # URL để các service gọi auth-service (dùng trong sendActivityLog)
+      AUTH_SERVICE_URL: http://auth-service:8080
 
   ai-service:
     build: ./ai-service
@@ -131,6 +149,8 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       MILVUS_HOST: milvus-standalone
       MILVUS_PORT: 19530
+      # URL để các service gọi auth-service (dùng trong sendActivityLog)
+      AUTH_SERVICE_URL: http://auth-service:8080
 
   milvus-standalone:
     image: milvusdb/milvus:v2.3.4

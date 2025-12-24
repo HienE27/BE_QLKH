@@ -125,6 +125,8 @@ public class ImportController {
         return ApiResponse.ok("Đã từ chối phiếu nhập", dto);
     }
 
+    // Controller no longer sends activity logs directly; service layer handles activity logging.
+
     // ================= GET ALL =====================
     /**
      * @deprecated Use paginated version {@link #getAllPaged(int, int)} instead.
