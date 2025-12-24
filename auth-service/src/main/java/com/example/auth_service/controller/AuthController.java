@@ -64,6 +64,12 @@ public class AuthController {
         return ApiResponse.ok("Nếu tài khoản cần xác thực email, hệ thống đã gửi lại email xác thực.", null);
     }
 
+    @PostMapping("/verify-unlock")
+    public ApiResponse<String> verifyUnlock(@RequestBody com.example.auth_service.dto.VerifyUnlockRequest request) {
+        authService.verifyUnlockCode(request.getUsername(), request.getCode());
+        return ApiResponse.ok("Mở khóa thành công", null);
+    }
+
     @GetMapping("/profile")
     public ApiResponse<UserProfileDto> getProfile() {
         String username = getCurrentUsername();

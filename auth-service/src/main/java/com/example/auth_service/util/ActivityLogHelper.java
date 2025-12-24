@@ -130,6 +130,36 @@ public class ActivityLogHelper {
                 case "UPDATE_ROLE_PERMISSIONS" -> "Cập nhật phân quyền vai trò: " + (resourceName != null ? resourceName : "-");
                 case "UPDATE_USER_PERMISSIONS" -> "Cập nhật phân quyền thành viên: " + (resourceName != null ? resourceName : "-");
                 case "RESET_PASSWORD", "RESET_PASSWORD_WITH_TOKEN" -> "Đặt lại mật khẩu";
+                // Import / Receipt actions
+                case "CREATE_RECEIPT" -> "Tạo phiếu nhập: " + (resourceName != null ? resourceName : "-");
+                case "UPDATE_RECEIPT" -> "Cập nhật phiếu nhập: " + (resourceName != null ? resourceName : "-");
+                case "APPROVE_RECEIPT" -> "Duyệt phiếu nhập: " + (resourceName != null ? resourceName : "-");
+                case "CONFIRM_RECEIPT" -> "Xác nhận nhập kho: " + (resourceName != null ? resourceName : "-");
+                case "CANCEL_RECEIPT" -> "Hủy phiếu nhập: " + (resourceName != null ? resourceName : "-");
+                case "REJECT_RECEIPT" -> "Từ chối phiếu nhập: " + (resourceName != null ? resourceName : "-");
+                case "DELETE_RECEIPT" -> "Xóa phiếu nhập: " + (resourceName != null ? resourceName : "-");
+                // Export / Delivery actions
+                case "CREATE_DELIVERY" -> "Tạo phiếu xuất: " + (resourceName != null ? resourceName : "-");
+                case "UPDATE_DELIVERY" -> "Cập nhật phiếu xuất: " + (resourceName != null ? resourceName : "-");
+                case "APPROVE_DELIVERY" -> "Duyệt phiếu xuất: " + (resourceName != null ? resourceName : "-");
+                case "CONFIRM_DELIVERY" -> "Xác nhận xuất kho: " + (resourceName != null ? resourceName : "-");
+                case "CANCEL_DELIVERY" -> "Hủy phiếu xuất: " + (resourceName != null ? resourceName : "-");
+                case "REJECT_DELIVERY" -> "Từ chối phiếu xuất: " + (resourceName != null ? resourceName : "-");
+                case "DELETE_DELIVERY" -> "Xóa phiếu xuất: " + (resourceName != null ? resourceName : "-");
+                // Inventory check actions
+                case "CREATE_INVENTORY_CHECK" -> "Tạo kiểm kê: " + (resourceName != null ? resourceName : "-");
+                case "UPDATE_INVENTORY_CHECK" -> "Cập nhật kiểm kê: " + (resourceName != null ? resourceName : "-");
+                case "APPROVE_INVENTORY_CHECK" -> "Duyệt kiểm kê: " + (resourceName != null ? resourceName : "-");
+                case "CONFIRM_INVENTORY_CHECK" -> "Xác nhận kiểm kê: " + (resourceName != null ? resourceName : "-");
+                case "REJECT_INVENTORY_CHECK" -> "Từ chối kiểm kê: " + (resourceName != null ? resourceName : "-");
+                case "DELETE_INVENTORY_CHECK" -> "Xóa kiểm kê: " + (resourceName != null ? resourceName : "-");
+                // Order actions
+                case "CREATE_ORDER" -> "Tạo đơn hàng: " + (resourceName != null ? resourceName : "-");
+                case "UPDATE_ORDER" -> "Cập nhật đơn hàng: " + (resourceName != null ? resourceName : "-");
+                case "APPROVE_ORDER" -> "Duyệt đơn hàng: " + (resourceName != null ? resourceName : "-");
+                case "CONFIRM_ORDER" -> "Xác nhận đơn hàng: " + (resourceName != null ? resourceName : "-");
+                case "CANCEL_ORDER" -> "Hủy đơn hàng: " + (resourceName != null ? resourceName : "-");
+                case "DELETE_ORDER" -> "Xóa đơn hàng: " + (resourceName != null ? resourceName : "-");
                 default -> "-";
             };
         }

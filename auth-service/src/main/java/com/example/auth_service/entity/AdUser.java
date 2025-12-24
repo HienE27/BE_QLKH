@@ -82,6 +82,16 @@ public class AdUser {
     @Temporal(TemporalType.TIMESTAMP)
     private Date accountLockedUntil; // null nếu chưa bị khóa
 
+    @Column(name = "unlock_token_hash")
+    private String unlockTokenHash;
+
+    @Column(name = "unlock_token_expiry")
+    @Temporal(TemporalType.TIMESTAMP)
+    private Date unlockTokenExpiry;
+
+    @Column(name = "unlock_token_attempts")
+    private Integer unlockTokenAttempts = 0;
+
     @Column(name = "created_at")
     private Date createdAt;
 

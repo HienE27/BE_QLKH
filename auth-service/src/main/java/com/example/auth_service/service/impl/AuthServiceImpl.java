@@ -172,16 +172,43 @@ public class AuthServiceImpl implements AuthService {
                     cal.add(Calendar.MINUTE, 15); // khóa 15 phút
                     Date lockedUntil = cal.getTime();
                     user.setAccountLockedUntil(lockedUntil);
-
-                    activityLogHelper.logActivity(
-                            user.getId(),
-                            user.getUsername(),
-                            "LOCK_ACCOUNT",
-                            "USER",
-                            user.getId(),
-                            user.getUsername(),
-                            String.format("Account locked until %s due to too many failed login attempts", lockedUntil)
-                    );
+            // generate unlock code and send email
+            try {
+                String rawCode = generateNumericCode(6);
+                String hashed = passwordEncoder.encode(rawCode);
+                Calendar expCal = Calendar.getInstance();
+                expCal.add(Calendar.MINUTE, 15);
+                Date expiry = expCal.getTime();
+                user.setUnlockTokenHash(hashed);
+                user.setUnlockTokenExpiry(expiry);
+                user.setUnlockTokenAttempts(0);
+                activityLogHelper.logActivity(
+                        user.getId(),
+                        user.getUsername(),
+                        "LOCK_ACCOUNT",
+                        "USER",
+                        user.getId(),
+                        user.getUsername(),
+                        String.format("Account locked until %s due to too many failed login attempts", lockedUntil)
+                );
+                // save before sending email
+                userRepository.save(user);
+                if (user.getEmail() != null && !user.getEmail().isBlank()) {
+                    emailService.sendUnlockCodeEmail(user.getEmail(), rawCode, user.getUsername(), expiry);
+                    activityLogHelper.logActivity(user.getId(), user.getUsername(), "SEND_UNLOCK_CODE", "USER", user.getId(), user.getUsername(), "Sent unlock code to email");
+                }
+            } catch (Exception e) {
+                // fallback: still log lock
+                activityLogHelper.logActivity(
+                        user.getId(),
+                        user.getUsername(),
+                        "LOCK_ACCOUNT",
+                        "USER",
+                        user.getId(),
+                        user.getUsername(),
+                        String.format("Account locked until %s due to too many failed login attempts (email send failed)", lockedUntil)
+                );
+            }
                 }
 
                 user.setUpdatedAt(new Date());
@@ -533,5 +560,60 @@ public class AuthServiceImpl implements AuthService {
         byte[] randomBytes = new byte[32];
         new SecureRandom().nextBytes(randomBytes);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(randomBytes);
+    }
+
+    // generate numeric code used for unlock
+    private String generateNumericCode(int digits) {
+        SecureRandom sr = new SecureRandom();
+        int max = (int) Math.pow(10, digits);
+        int min = max / 10;
+        int n = sr.nextInt(max - min) + min;
+        return String.format("%0" + digits + "d", n);
+    }
+
+    @Override
+    @Transactional
+    public void verifyUnlockCode(String username, String code) {
+        AdUser user = userRepository.findByUsername(username).orElseThrow(() -> new BadRequestException("Yêu cầu không hợp lệ"));
+
+        if (user.getUnlockTokenExpiry() == null || user.getUnlockTokenExpiry().before(new Date()) || user.getUnlockTokenHash() == null) {
+            throw new BadRequestException("Mã mở khóa không hợp lệ hoặc đã hết hạn");
+        }
+
+        int attempts = user.getUnlockTokenAttempts() != null ? user.getUnlockTokenAttempts() : 0;
+        if (attempts >= 5) {
+            user.setUnlockTokenHash(null);
+            user.setUnlockTokenExpiry(null);
+            user.setUnlockTokenAttempts(0);
+            userRepository.save(user);
+            activityLogHelper.logActivity(user.getId(), user.getUsername(), "VERIFY_UNLOCK_FAILED", "USER", user.getId(), user.getUsername(), "Exceeded unlock verify attempts");
+            throw new BadRequestException("Quá nhiều lần thử mã mở khóa");
+        }
+
+        boolean ok = false;
+        try {
+            ok = passwordEncoder.matches(code, user.getUnlockTokenHash());
+        } catch (Exception e) {
+            ok = false;
+        }
+
+        if (!ok) {
+            user.setUnlockTokenAttempts(attempts + 1);
+            userRepository.save(user);
+            activityLogHelper.logActivity(user.getId(), user.getUsername(), "VERIFY_UNLOCK_FAILED", "USER", user.getId(), user.getUsername(), "Incorrect unlock code");
+            throw new BadRequestException("Mã không đúng");
+        }
+
+        // success: clear lock + token + revoke sessions
+        user.setAccountLockedUntil(null);
+        user.setFailedLoginAttempts(0);
+        user.setUnlockTokenHash(null);
+        user.setUnlockTokenExpiry(null);
+        user.setUnlockTokenAttempts(0);
+        user.setUpdatedAt(new Date());
+        userRepository.save(user);
+
+        refreshTokenService.revokeAllUserTokens(user.getId());
+        activityLogHelper.logActivity(user.getId(), user.getUsername(), "UNLOCK_ACCOUNT", "USER", user.getId(), user.getUsername(), "Account unlocked via email code");
     }
 }

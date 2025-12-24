@@ -86,6 +86,40 @@ Hệ thống Activity Logs (Nhật ký hoạt động) ghi lại tất cả các
 - `UPDATE_PERMISSION`: Cập nhật permission
 - `DELETE_PERMISSION`: Xóa permission
 
+### Receipt / Import (Phiếu nhập)
+- `CREATE_RECEIPT`: Tạo phiếu nhập
+- `UPDATE_RECEIPT`: Cập nhật phiếu nhập
+- `APPROVE_RECEIPT`: Duyệt phiếu nhập
+- `CONFIRM_RECEIPT`: Xác nhận nhập kho (đã nhập)
+- `CANCEL_RECEIPT`: Hủy phiếu nhập
+- `REJECT_RECEIPT`: Từ chối phiếu nhập
+- `DELETE_RECEIPT`: Xóa phiếu nhập
+
+### Delivery / Export (Phiếu xuất)
+- `CREATE_DELIVERY`: Tạo phiếu xuất
+- `UPDATE_DELIVERY`: Cập nhật phiếu xuất
+- `APPROVE_DELIVERY`: Duyệt phiếu xuất
+- `CONFIRM_DELIVERY`: Xác nhận xuất kho (đã xuất)
+- `CANCEL_DELIVERY`: Hủy phiếu xuất
+- `REJECT_DELIVERY`: Từ chối phiếu xuất
+- `DELETE_DELIVERY`: Xóa phiếu xuất
+
+### Inventory Check (Kiểm kê)
+- `CREATE_INVENTORY_CHECK`: Tạo phiếu kiểm kê
+- `UPDATE_INVENTORY_CHECK`: Cập nhật phiếu kiểm kê
+- `APPROVE_INVENTORY_CHECK`: Duyệt kiểm kê
+- `CONFIRM_INVENTORY_CHECK`: Xác nhận kiểm kê
+- `REJECT_INVENTORY_CHECK`: Từ chối kiểm kê
+- `DELETE_INVENTORY_CHECK`: Xóa kiểm kê
+
+### Order (Đơn hàng)
+- `CREATE_ORDER`: Tạo đơn hàng
+- `UPDATE_ORDER`: Cập nhật đơn hàng
+- `APPROVE_ORDER`: Duyệt đơn hàng
+- `CONFIRM_ORDER`: Xác nhận đơn hàng
+- `CANCEL_ORDER`: Hủy đơn hàng
+- `DELETE_ORDER`: Xóa đơn hàng
+
 ## Security
 
 ### Permissions

@@ -17,6 +17,7 @@ public interface AuthService {
     void resetPasswordWithToken(ResetPasswordWithTokenRequest request);
     void verifyEmail(String token);
     void resendVerificationEmail(String username);
+    void verifyUnlockCode(String username, String code);
     UserProfileDto getCurrentUserProfile(String username);
     UserProfileDto updateProfile(String username, UpdateProfileRequest request);
     void deleteAccount(String username);

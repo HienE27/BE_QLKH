@@ -51,6 +51,19 @@ public class EmailServiceImpl implements EmailService {
         send(to, subject, text, "PASSWORD_RESET");
     }
 
+    @Override
+    public void sendUnlockCodeEmail(String to, String code, String username, java.util.Date expiry) {
+        String subject = "Mã mở khóa tài khoản";
+        String text = "Xin chào " + username + ",\n\n"
+                + "Tài khoản của bạn vừa bị khóa tạm thời vì nhiều lần đăng nhập sai. "
+                + "Để mở khóa, vui lòng nhập mã sau vào form mở khóa:\n\n"
+                + code + "\n\n"
+                + "Mã có hiệu lực đến: " + expiry + "\n\n"
+                + "Nếu bạn không thực hiện yêu cầu này, vui lòng liên hệ quản trị hệ thống.";
+
+        send(to, subject, text, "UNLOCK_CODE");
+    }
+
     private void send(String to, String subject, String text, String category) {
         if (!emailEnabled) {
             log.info("[AUTH][MAIL][DISABLED] category={} to={} subject={} body={}", category, to, subject, text);
